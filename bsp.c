@@ -1,5 +1,8 @@
 #include "bsp.h"
+#include "impulsator.h"
+
 #include <stdio.h>
+
 
 static bool volUpAvailable = false;
 static bool volDnAvailable = false;
@@ -38,8 +41,55 @@ bool periodicCheck(repeating_timer_t *rt)
     return true;
 }
 
+// void button_callback(uint gpio, uint32_t event_mask)
+// {
+
+// }
+
+static uint8_t volumeEncoderState = ENCODER_INIT;
+uint8_t getState() {return volumeEncoderState;}
+#define ENCODER 1
 void button_callback(uint gpio, uint32_t event_mask)
 {
+    #ifdef ENCODER
+    uint8_t nextState = processEncoder(volumeEncoderState, gpio_get(VOL_UP_BUTTON), gpio_get(VOL_DN_BUTTON));
+    printf("[%2d, %2d] %x -> %x", !gpio_get(VOL_UP_BUTTON), !gpio_get(VOL_DN_BUTTON), volumeEncoderState, nextState);
+    if ((nextState & DIR_CW) != 0)
+    {
+        volUpAvailable = true;
+        printf(", volUp");
+    }
+    else if ((nextState & DIR_CCW) != 0)
+    {
+        volDnAvailable = true;
+        printf(", volDn");
+    }
+    printf("\n");
+    volumeEncoderState = nextState;
+
+
+    // Pamiętaj, że przyciski mają pull-upy.
+    if (!gpio_get(VOL_UP_BUTTON))
+    // if (gpio == VOL_UP_BUTTON)
+    {
+        gpio_put(VOL_UP_LED, 1);
+        ledsLit[0] = 1;
+    }
+
+    if (!gpio_get(VOL_DN_BUTTON))
+    // if (gpio == VOL_DN_BUTTON)
+    {
+        gpio_put(VOL_DN_LED, 1);
+        ledsLit[1] = 1;
+    }
+
+    // if (!gpio_get(VOL_UP_BUTTON) && !gpio_get(VOL_DN_BUTTON))
+    // {
+    //     gpio_put(USB_STATUS_LED, 1);
+    // }
+    // __irq_enable();
+    #else
+    // Przyciski
     static const uint32_t debounceDelay = 100;
     static uint32_t lastMs = 0;
 
@@ -69,6 +119,7 @@ void button_callback(uint gpio, uint32_t event_mask)
             break;
     }
     // __irq_enable();
+    #endif
 }
 
 void bspInit()

@@ -235,11 +235,20 @@ void hid_task()
             uint8_t keycode[6] = {0};
             if (buttons[0])
             {
-                keycode[0] = HID_KEY_VOLUME_UP;
+                // keycode[0] = HID_KEY_VOLUME_UP;
+                keycode[0] = HID_KEY_U;
+                // keycode[1] = HID_KEY_P;
+                // keycode[2] = HID_KEY_SPACE;
             }
             else if (buttons[1])
             {
-                keycode[0] = HID_KEY_VOLUME_DOWN;
+
+                keycode[0] = HID_KEY_D;
+                // keycode[1] = HID_KEY_O;
+                // keycode[2] = HID_KEY_W;
+                // keycode[3] = HID_KEY_N;
+                // keycode[4] = HID_KEY_SPACE;
+                // keycode[0] = HID_KEY_VOLUME_DOWN;
             }
 
             tud_hid_n_keyboard_report(ITF_KEYBOARD, 0, 0, keycode);

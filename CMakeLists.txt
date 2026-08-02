@@ -39,13 +39,14 @@ add_executable(volume-up
     volume-up.c
     usb_part.c
     bsp.c
+    impulsator.c
 )
 
 pico_set_program_name(volume-up "volume-up")
 pico_set_program_version(volume-up "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(volume-up 0)
+pico_enable_stdio_uart(volume-up 1)
 pico_enable_stdio_usb(volume-up 0)
 
 # target_sources(volume-up
