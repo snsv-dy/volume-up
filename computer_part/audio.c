@@ -24,7 +24,7 @@ typedef struct {
 void pa_state_cb(pa_context *c, void *userdata);
 void pa_sinklist_cb(pa_context *c, const pa_sink_info *l, int eol, void *userdata);
 void pa_sourcelist_cb(pa_context *c, const pa_source_info *l, int eol, void *userdata);
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs);
+int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action);
 
 void pa_sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata);
 
@@ -47,8 +47,27 @@ void pa_sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, 
 // 1. Zmiana głośności sink inputa youtuba (może się resetować przy zmianie filmu, bo zmiana nie pochodzi z ui)
 // 2. 
 
+const enum
+{
+    ACTION_INCORRECT = 0,
+    ACTION_INC5 = 1,
+    ACTION_DEC5 = 2
+};
 
 int main(int argc, char *argv[]) {
+    int action = ACTION_INC5;
+    if (argc > 1)
+    {
+        if (argv[1][0] == '+')
+        {
+            action = ACTION_INC5;
+        }
+        else if (argv[1][0] == '-')
+        {
+            action = ACTION_DEC5;
+        }
+    }
+
     int ctr;
 
     // This is where we'll store the input device list
@@ -60,7 +79,7 @@ int main(int argc, char *argv[]) {
 
 
 
-    if (pa_get_devicelist(pa_input_devicelist, pa_output_devicelist, sinkInputInfoList) < 0) {
+    if (pa_get_devicelist(pa_input_devicelist, pa_output_devicelist, sinkInputInfoList, action) < 0) {
         fprintf(stderr, "failed to get device list\n");
         return 1;
     }
@@ -116,16 +135,90 @@ pa_operation* GetSinkInputs(pa_context *pa_ctx, mySinkInputInfo* sinkInputs, int
     (*state)++;
 }
 
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs) {
+#define SMALL_STR_LEN 128
+
+void server_info_cb(pa_context *c, const pa_server_info*i, void *userdata)
+{
+    if (userdata)
+    {
+        strncpy((char*)userdata, i->default_sink_name, SMALL_STR_LEN - 1);
+    }
+}
+
+typedef struct {
+    uint32_t set;
+    uint32_t index;
+    pa_volume_t volume;
+    pa_cvolume cvolume;
+} smallerSinkInfo;
+
+void sink_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
+{
+    if (eol < 0) {
+        printf("Failed to get sink information: %s", pa_strerror(pa_context_errno(c)));
+        return;
+    }
+
+    if (eol)
+    {
+        return;
+    }
+
+    smallerSinkInfo* info = (smallerSinkInfo*)userdata;
+    if (i == NULL)
+    {
+        printf("Sink with that name is null, eol: %d\n", eol);
+        return;
+    }
+
+    info->index = i->index;
+    info->volume = pa_cvolume_avg(&(i->volume));
+    info->cvolume.channels = i->volume.channels;
+    for (int index = 0; index < i->volume.channels; index++)
+    {
+        info->cvolume.values[index] = i->volume.values[index];
+    }
+    info->set = 1;
+}
+
+void set_volume_success_cb(pa_context *c, int success, void *userdata)
+{
+    if (!success)
+    {
+        printf("No success\n");
+    }
+}
+
+int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action) {
     // Define our pulse audio loop and connection variables
     pa_mainloop *pa_ml;
     pa_mainloop_api *pa_mlapi;
-    pa_operation *pa_op;
+    pa_operation *pa_op = NULL;
     pa_context *pa_ctx;
 
     // We'll need these state variables to keep track of our requests
-    int state = 0;
+    // #define STATE_INIT 5
+    // #define STATE_READY 0
+    // #define STATE_PROCESSING 1
+    // #define STATE_EXIT 2
+    // #define ACTION_GET_SINK_INPUTS 3
+    // #define ACTION_GET_DEFAULT_SINK 4
+
+    #define GET_SERVER 6
+    #define GET_DEFAULT_SINK_INFO 7
+    #define GET_DEFAULT_SINK_VOLUME 8
+    #define SET_DEFAULT_SINK_VOLUME 9
+
+    // Get server params
+    // Get default sink name
+    // Get default sink volume
+    // Set default sink volume +5%
+
+    int state = GET_SERVER;
     int pa_ready = 0;
+
+    char defaultSinkName[128] = {0};
+    smallerSinkInfo defaultSinkInfo = {0};
 
     // Initialize our device lists
     memset(input, 0, sizeof(pa_devicelist_t) * 16);
@@ -166,52 +259,102 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
         // At this point, we're connected to the server and ready to make
         // requests
         switch (state) {
-            // State 0: we haven't done anything yet
-            case 12:
-                // This sends an operation to the server.  pa_sinklist_info is
-                // our callback function and a pointer to our devicelist will
-                // be passed to the callback The operation ID is stored in the
-                // pa_op variable
-                pa_op = pa_context_get_sink_info_list(pa_ctx,
-                        pa_sinklist_cb,
-                        output
-                        );
-
-                // Update state for next iteration through the loop
-                state++;
-                break;
-            case 13:
-                // // Now we wait for our operation to complete.  When it's
-                // // complete our pa_output_devicelist is filled out, and we move
-                // // along to the next state
-                // if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
-                //     pa_operation_unref(pa_op);
-
-                    // Now we perform another operation to get the source
-                    // (input device) list just like before.  This time we pass
-                    // a pointer to our input structure
-                    pa_op = pa_context_get_source_info_list(pa_ctx,
-                            pa_sourcelist_cb,
-                            input
-                            );
-                    // Update the state so we know what to do next
-                    state++;
-                // }
-                break;
-            case 0:
-                // pa_op = pa_context_get_sink_input_info_list(pa_ctx, pa_sink_input_info_cb, void *userdata);
-                // if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
-                //     pa_operation_unref(pa_op);
-
-                    // Now we perform another operation to get the source
-                    // (input device) list just like before.  This time we pass
-                    // a pointer to our input structure
-                    pa_op = GetSinkInputs(pa_ctx, pa_sink_input_info_cb, sinkInputs);
-                // }
-                break;
-            case 1:
+            case GET_SERVER:
+                pa_op = pa_context_get_server_info(pa_ctx, server_info_cb, (void *)defaultSinkName);
+                state = GET_DEFAULT_SINK_INFO;
+            break;
+            case GET_DEFAULT_SINK_INFO:
                 if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
-                    // Now we're done, clean up and disconnect and return
+                    pa_operation_unref(pa_op);
+                    printf("Default sink name: '%s'\n", defaultSinkName);
+                    pa_op = pa_context_get_sink_info_by_name(pa_ctx, defaultSinkName, sink_info_cb, (void *)&defaultSinkInfo);
+                    state = GET_DEFAULT_SINK_VOLUME;
+                }
+                break;
+            case GET_DEFAULT_SINK_VOLUME:
+                if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
+                    pa_operation_unref(pa_op);
+                    if (defaultSinkInfo.set)
+                    {
+                        printf("Default sink index: %d\n", defaultSinkInfo.index);
+                        // printf("Default sink volume: %f\n", (double)defaultSinkInfo.volume / PA_VOLUME_NORM * 100.0);
+                        if (action == ACTION_INC5)
+                        {
+                            pa_volume_t newVolume = defaultSinkInfo.volume + ((double)defaultSinkInfo.volume * 0.05);
+                            float oldVolumePercent = (double)defaultSinkInfo.volume / PA_VOLUME_NORM * 100.0;
+                            float newVolumePercent = (double)newVolume / PA_VOLUME_NORM * 100.0;
+                            printf("Action: increase by 5%%, old volume: %u (%2.2f), setting to: %u (%2.2f)\n",
+                                defaultSinkInfo.volume,
+                                oldVolumePercent,
+                                newVolume,
+                                newVolumePercent
+                            );
+
+                            pa_cvolume_inc(&defaultSinkInfo.cvolume, PA_VOLUME_NORM * 0.05);
+                            pa_op = pa_context_set_sink_volume_by_index(pa_ctx, defaultSinkInfo.index, &defaultSinkInfo.cvolume, set_volume_success_cb, NULL);
+                        }
+                        else if (action == ACTION_DEC5)
+                        {
+                            pa_volume_t newVolume = defaultSinkInfo.volume - ((double)defaultSinkInfo.volume * 0.05);
+                            float oldVolumePercent = (double)defaultSinkInfo.volume / PA_VOLUME_NORM * 100.0;
+                            float newVolumePercent = (double)newVolume / PA_VOLUME_NORM * 100.0;
+                            printf("Action: increase by 5%%, old volume: %u (%2.2f), setting to: %u (%2.2f)\n",
+                                defaultSinkInfo.volume,
+                                oldVolumePercent,
+                                newVolume,
+                                newVolumePercent
+                            );
+                            pa_cvolume_dec(&defaultSinkInfo.cvolume, PA_VOLUME_NORM * 0.05);
+                            pa_op = pa_context_set_sink_volume_by_index(pa_ctx, defaultSinkInfo.index, &defaultSinkInfo.cvolume, set_volume_success_cb, NULL);
+                        }
+                    }
+                    else
+                    {
+                        printf("Default sink info not set\n");
+                        pa_operation_unref(pa_op);
+                        pa_context_disconnect(pa_ctx);
+                        pa_context_unref(pa_ctx);
+                        pa_mainloop_free(pa_ml);
+                        return 0;
+                    }
+                    state = SET_DEFAULT_SINK_VOLUME;
+                    // int check_id = 0;
+                    // if (output[check_id].initialized)
+                    // {
+                    //     printf("[1] sink name: '%s'\n", output[check_id].name);
+                    //     // pa_op = pa_context_get_sink_info_by_index(pa_ctx, output[check_id].index, sink_info_cb, (void *)&defaultSinkInfo);
+                    //     pa_op = pa_context_get_sink_info_by_name(pa_ctx, "@DEFAULT_SINK@", sink_info_cb, (void *)&defaultSinkInfo);
+                    //     // pa_op = pa_context_get_sink_info_by_name(pa_ctx, "alsa_output.pci-0000_01_00.1.hdmi-stereo", sink_info_cb, (void *)&defaultSinkInfo);
+                    // }
+
+                }
+                // break;
+            // case STATE_READY:
+            //     // Poll user for action
+            //     int input = 0;
+
+            //     if (action == ACTION_GET_SINK_INPUTS)
+            //     {
+            //     // pa_op = pa_context_get_sink_input_info_list(pa_ctx, pa_sink_input_info_cb, void *userdata);
+            //     // if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
+            //     //     pa_operation_unref(pa_op);
+
+            //         // Now we perform another operation to get the source
+            //         // (input device) list just like before.  This time we pass
+            //         // a pointer to our input structure
+            //         pa_op = GetSinkInputs(pa_ctx, pa_sink_input_info_cb, sinkInputs);
+            //         state = STATE_PROCESSING;
+            //     }
+            //     // }
+            //     break;
+            // case STATE_PROCESSING:
+            //     if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
+            //         state = STATE_PROCESSING;
+            //         action = ACTION_GET_DEFAULT_SINK;
+            //     }
+            //     break;
+            case SET_DEFAULT_SINK_VOLUME:
+                if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
                     pa_operation_unref(pa_op);
                     pa_context_disconnect(pa_ctx);
                     pa_context_unref(pa_ctx);
