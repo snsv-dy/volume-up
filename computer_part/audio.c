@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <pulse/pulseaudio.h>
+#include <pthread.h>
+#include <stdatomic.h>
 
 // Field list is here: http://0pointer.de/lennart/projects/pulseaudio/doxygen/structpa__sink__info.html
 typedef struct pa_devicelist {
@@ -24,18 +26,18 @@ typedef struct {
 void pa_state_cb(pa_context *c, void *userdata);
 void pa_sinklist_cb(pa_context *c, const pa_sink_info *l, int eol, void *userdata);
 void pa_sourcelist_cb(pa_context *c, const pa_source_info *l, int eol, void *userdata);
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action);
+int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action, IpcStruct*);
 
 void pa_sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata);
 
 
 
 // W pierwszym kroku:
-// 1. Pobierz aktualną głośność systemu
-//  a0. funkcja do requestowania rzeczy.
-//  a. get server cośtam
-// 2. Zwiększ/Zmniejsz o 5%
-// 3. Zwiększ/Zmniejsz o obojętnie ile
+// [X] 1. Pobierz aktualną głośność systemu
+// [X]  a0. funkcja do requestowania rzeczy.
+// [X]  a. get server cośtam
+// [X] 2. Zwiększ/Zmniejsz o 5%
+// [X] 3. Zwiększ/Zmniejsz o obojętnie ile
 // ------------------------------------
 // Hw capab:
 //  * Tryb klawiatury
@@ -44,28 +46,175 @@ void pa_sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, 
 // * Przycisk wyciszenia
 // ====================================
 // W kolejnym kroku
+// 1. subskrybuj eventy
+// 2. jednocześnie pozwalaj na input
+// ====================================
+// później na spokojnie
 // 1. Zmiana głośności sink inputa youtuba (może się resetować przy zmianie filmu, bo zmiana nie pochodzi z ui)
 // 2. 
 
-const enum
+enum
 {
     ACTION_INCORRECT = 0,
-    ACTION_INC5 = 1,
-    ACTION_DEC5 = 2
+    ACTION_INC5  = 0b000001,
+    ACTION_DEC5  = 0b000010,
+    ACTION_INC1  = 0b000100,
+    ACTION_DEC1  = 0b001000,
+    ACTION_SET24 = 0b010000,
+    ACTION_SET29 = 0b100000,
 };
 
+typedef struct {
+    int action;
+    pthread_mutex_t actionMutex;
+
+    atomic_bool operationInProcess;
+    pthread_mutex_t operationMutex;
+
+    pthread_mutex_t mainloopMutex;
+
+    pthread_mutex_t inputThreadSignal;
+    pthread_mutex_t mainloopActionSignal;
+
+    // exp
+    // pthread_cond_t 
+} IpcStruct;
+
+void setAction(IpcStruct* ipc, int action);
+int WaitForAction();
+void SetOperationInProgress();
+void ClearOperationInProgress();
+
+void* inputThread(void* arg)
+{
+    IpcStruct* ipc = (IpcStruct*)arg;
+    int running = 1;
+    char actionChar = '\0';
+    int action;
+    while(running)
+    {
+        action = ACTION_INCORRECT;
+        int nGot = scanf("%c", &actionChar);
+        if (nGot == 1)
+        {
+            if (actionChar == '+') { action = ACTION_INC5; }
+            else if (actionChar == '-') { action = ACTION_DEC5; }
+            else if (actionChar == 'i') { action = ACTION_INC1; }
+            else if (actionChar == 'd') { action = ACTION_DEC1; }
+            else if (actionChar == '4') { action = ACTION_SET24; }
+            else if (actionChar == '9') { action = ACTION_SET29; }
+            else if (actionChar == '\n') { continue; }
+            else if (actionChar == 'q') { return NULL; }
+            
+            printf("[input] cs enter\n");
+            setAction(ipc, action);
+            printf("[input] cs exit\n");
+
+            printf("got '%c', ", actionChar);
+            printf("Action: ");
+            switch (action)
+            {
+                case ACTION_INC5: printf("ACTION_INC5"); break;
+                case ACTION_DEC5: printf("ACTION_DEC5"); break;
+                case ACTION_INC1: printf("ACTION_INC1"); break;
+                case ACTION_DEC1: printf("ACTION_DEC1"); break;
+                case ACTION_SET24: printf("ACTION_SET24"); break;
+                case ACTION_SET29: printf("ACTION_SET29"); break;
+                default:
+            }
+            printf("\n");
+        }
+    }
+}
+
+// void mainloopAquire(IpcStruct* ipc);
+// void mainloopRelease(IpcStruct* ipc);
+
+void initInputThread(pthread_t* thread, IpcStruct* ipc)
+{
+    assert(thread && ipc);
+
+    atomic_init(&ipc->operationInProcess, 0);
+    if (   pthread_mutex_init(&ipc->mainloopMutex, NULL)
+        || pthread_mutex_init(&ipc->operationMutex, NULL)
+        || pthread_mutex_init(&ipc->actionMutex, NULL)
+        || pthread_mutex_init(&ipc->mainloopActionSignal, NULL)
+        || pthread_mutex_init(&ipc->inputThreadSignal, NULL)
+    )
+    {
+        printf("Failed to initialize ipc\n");
+        // exit here;
+        return;
+    }
+    
+
+    if (pthread_create(thread, NULL, inputThread, NULL) != 0)
+    {
+        printf("Failed to create input thread\n");
+    }
+}
+
+void setAction(IpcStruct* ipc, int action)
+{
+    // TODO: Po co tu mutex, jak to jest atomowe?!??!?!
+    // pthread_mutex_lock(&ipc->operationMutex);
+    // int operationValue = atomic_load(&ipc->operationInProcess);
+    // pthread_mutex_unlock(&ipc->operationMutex);
+
+    while (atomic_load(&ipc->operationInProcess) == 1)
+    // if (operationValue == 1)
+    {
+        // Unlocked by mainloop.
+        pthread_mutex_lock(&ipc->inputThreadSignal);
+    }
+
+    pthread_mutex_lock(&ipc->actionMutex);
+    ipc->action = action;
+    pthread_mutex_unlock(&ipc->actionMutex);
+    // Signal the mainloop that action is ready to execute.
+    pthread_mutex_unlock(&ipc->mainloopActionSignal);
+}
+
+int WaitForAction(IpcStruct* ipc)
+{
+    pthread_mutex_lock(&ipc->actionMutex);
+    if (ipc->action != ACTION_INCORRECT)
+    {
+        SetOperationInProgress(ipc);
+        pthread_mutex_unlock(&ipc->actionMutex);
+        return ipc->action;
+    }
+
+    // Unlock mutex before long wait.
+    pthread_mutex_unlock(&ipc->actionMutex);
+    pthread_mutex_lock(&ipc->mainloopActionSignal);
+
+    SetOperationInProgress(ipc);
+    return ipc->action;
+}
+void SetOperationInProgress(IpcStruct* ipc)
+{
+    atomic_store(&ipc->operationInProcess, 1);
+}
+
+void ClearOperationInProgress(IpcStruct* ipc)
+{
+    // Unlock input thread.
+
+    atomic_store(&ipc->operationInProcess, 0);
+    pthread_mutex_unlock(&ipc->inputThreadSignal);
+}
+
 int main(int argc, char *argv[]) {
-    int action = ACTION_INC5;
+    int action = ACTION_INC1;
     if (argc > 1)
     {
-        if (argv[1][0] == '+')
-        {
-            action = ACTION_INC5;
-        }
-        else if (argv[1][0] == '-')
-        {
-            action = ACTION_DEC5;
-        }
+             if (argv[1][0] == '+') { action = ACTION_INC5; }
+        else if (argv[1][0] == '-') { action = ACTION_DEC5; }
+        else if (argv[1][0] == 'i') { action = ACTION_INC1; }
+        else if (argv[1][0] == 'd') { action = ACTION_DEC1; }
+        else if (argv[1][0] == '4') { action = ACTION_SET24; }
+        else if (argv[1][0] == '9') { action = ACTION_SET29; }
     }
 
     int ctr;
@@ -77,9 +226,13 @@ int main(int argc, char *argv[]) {
     pa_devicelist_t pa_output_devicelist[16];
     mySinkInputInfo sinkInputInfoList[16];
 
+    // pa_context_subscribe();
+    pthread_t inputThread;
+    IpcStruct ipc = {0};
+    initInputThread(&inputThread, &ipc);
 
 
-    if (pa_get_devicelist(pa_input_devicelist, pa_output_devicelist, sinkInputInfoList, action) < 0) {
+    if (pa_get_devicelist(pa_input_devicelist, pa_output_devicelist, sinkInputInfoList, action, &ipc) < 0) {
         fprintf(stderr, "failed to get device list\n");
         return 1;
     }
@@ -121,6 +274,9 @@ int main(int argc, char *argv[]) {
         printf("Index: %d\n", sinkInput->index);
         printf("\n");
     }
+
+    pthread_join(inputThread, NULL);
+
     return 0;
 }
 
@@ -189,7 +345,71 @@ void set_volume_success_cb(pa_context *c, int success, void *userdata)
     }
 }
 
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action) {
+void setVolume(pa_cvolume* cvolume, int action)
+{
+    printf("Action: ");
+    switch (action)
+    {
+        case ACTION_INC5: printf("ACTION_INC5"); break;
+        case ACTION_DEC5: printf("ACTION_DEC5"); break;
+        case ACTION_INC1: printf("ACTION_INC1"); break;
+        case ACTION_DEC1: printf("ACTION_DEC1"); break;
+        case ACTION_SET24: printf("ACTION_SET24"); break;
+        case ACTION_SET29: printf("ACTION_SET29"); break;
+        default:
+    }
+    printf("\n");
+
+    static const struct percentMap {
+        uint32_t action;
+        double factor;
+    } percents[] = {
+        {ACTION_INC5, 0.05},
+        {ACTION_DEC5, -0.05},
+        {ACTION_INC1, 0.01},
+        {ACTION_DEC1, -0.01},
+        {ACTION_SET24, 0.24},
+        {ACTION_SET29, 0.29},
+    };
+
+    double factor = 0.0;
+    for (int index = 0; index < 6; index++) 
+    {
+        factor = percents[index].factor;
+        if (percents[index].action == action)
+        {
+            break;
+        }
+    }
+        
+    const pa_volume_t oldVolume = pa_cvolume_avg(cvolume);
+    if ((action & (ACTION_INC5 | ACTION_DEC5 | ACTION_INC1 | ACTION_DEC1)) != 0)
+    {
+        if (factor > 0.0)
+        {
+            pa_cvolume_inc(cvolume, PA_VOLUME_NORM * factor);
+        }
+        else
+        {
+            pa_cvolume_dec(cvolume, PA_VOLUME_NORM * -factor);
+        }
+    }
+    else if ((action & (ACTION_SET24 | ACTION_SET29)) != 0)
+    {
+        pa_cvolume_set(cvolume, cvolume->channels, PA_VOLUME_NORM * factor);
+    }
+
+    float oldVolumePercent = (double)oldVolume / PA_VOLUME_NORM * 100.0;
+    float newVolumePercent = (double)pa_cvolume_avg(cvolume) / PA_VOLUME_NORM * 100.0;
+    printf("Action: decrease by 5%%, old volume: %u (%2.2f), setting to: %u (%2.2f)\n",
+        oldVolume,
+        oldVolumePercent,
+        pa_cvolume_avg(cvolume),
+        newVolumePercent
+    );
+}
+
+int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action, IpcStruct* ipc) {
     // Define our pulse audio loop and connection variables
     pa_mainloop *pa_ml;
     pa_mainloop_api *pa_mlapi;
@@ -208,6 +428,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
     #define GET_DEFAULT_SINK_INFO 7
     #define GET_DEFAULT_SINK_VOLUME 8
     #define SET_DEFAULT_SINK_VOLUME 9
+    #define EXITING 10
 
     // Get server params
     // Get default sink name
@@ -243,6 +464,14 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
     // Now we'll enter into an infinite loop until we get the data we receive
     // or if there's an error
     for (;;) {
+
+        int action = WaitForAction();
+        // SetOperationInProgress(); // To się wywołuje w wait for action
+
+        // loop
+
+        // Clear operation in progress
+
         // We can't do anything until PA is ready, so just iterate the mainloop
         // and continue
         if (pa_ready == 0) {
@@ -277,36 +506,8 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
                     if (defaultSinkInfo.set)
                     {
                         printf("Default sink index: %d\n", defaultSinkInfo.index);
-                        // printf("Default sink volume: %f\n", (double)defaultSinkInfo.volume / PA_VOLUME_NORM * 100.0);
-                        if (action == ACTION_INC5)
-                        {
-                            pa_volume_t newVolume = defaultSinkInfo.volume + ((double)defaultSinkInfo.volume * 0.05);
-                            float oldVolumePercent = (double)defaultSinkInfo.volume / PA_VOLUME_NORM * 100.0;
-                            float newVolumePercent = (double)newVolume / PA_VOLUME_NORM * 100.0;
-                            printf("Action: increase by 5%%, old volume: %u (%2.2f), setting to: %u (%2.2f)\n",
-                                defaultSinkInfo.volume,
-                                oldVolumePercent,
-                                newVolume,
-                                newVolumePercent
-                            );
-
-                            pa_cvolume_inc(&defaultSinkInfo.cvolume, PA_VOLUME_NORM * 0.05);
-                            pa_op = pa_context_set_sink_volume_by_index(pa_ctx, defaultSinkInfo.index, &defaultSinkInfo.cvolume, set_volume_success_cb, NULL);
-                        }
-                        else if (action == ACTION_DEC5)
-                        {
-                            pa_volume_t newVolume = defaultSinkInfo.volume - ((double)defaultSinkInfo.volume * 0.05);
-                            float oldVolumePercent = (double)defaultSinkInfo.volume / PA_VOLUME_NORM * 100.0;
-                            float newVolumePercent = (double)newVolume / PA_VOLUME_NORM * 100.0;
-                            printf("Action: increase by 5%%, old volume: %u (%2.2f), setting to: %u (%2.2f)\n",
-                                defaultSinkInfo.volume,
-                                oldVolumePercent,
-                                newVolume,
-                                newVolumePercent
-                            );
-                            pa_cvolume_dec(&defaultSinkInfo.cvolume, PA_VOLUME_NORM * 0.05);
-                            pa_op = pa_context_set_sink_volume_by_index(pa_ctx, defaultSinkInfo.index, &defaultSinkInfo.cvolume, set_volume_success_cb, NULL);
-                        }
+                        setVolume(&defaultSinkInfo.cvolume, action);
+                        pa_op = pa_context_set_sink_volume_by_index(pa_ctx, defaultSinkInfo.index, &defaultSinkInfo.cvolume, set_volume_success_cb, NULL);
                     }
                     else
                     {
@@ -318,42 +519,16 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
                         return 0;
                     }
                     state = SET_DEFAULT_SINK_VOLUME;
-                    // int check_id = 0;
-                    // if (output[check_id].initialized)
-                    // {
-                    //     printf("[1] sink name: '%s'\n", output[check_id].name);
-                    //     // pa_op = pa_context_get_sink_info_by_index(pa_ctx, output[check_id].index, sink_info_cb, (void *)&defaultSinkInfo);
-                    //     pa_op = pa_context_get_sink_info_by_name(pa_ctx, "@DEFAULT_SINK@", sink_info_cb, (void *)&defaultSinkInfo);
-                    //     // pa_op = pa_context_get_sink_info_by_name(pa_ctx, "alsa_output.pci-0000_01_00.1.hdmi-stereo", sink_info_cb, (void *)&defaultSinkInfo);
-                    // }
 
                 }
-                // break;
-            // case STATE_READY:
-            //     // Poll user for action
-            //     int input = 0;
-
-            //     if (action == ACTION_GET_SINK_INPUTS)
-            //     {
-            //     // pa_op = pa_context_get_sink_input_info_list(pa_ctx, pa_sink_input_info_cb, void *userdata);
-            //     // if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
-            //     //     pa_operation_unref(pa_op);
-
-            //         // Now we perform another operation to get the source
-            //         // (input device) list just like before.  This time we pass
-            //         // a pointer to our input structure
-            //         pa_op = GetSinkInputs(pa_ctx, pa_sink_input_info_cb, sinkInputs);
-            //         state = STATE_PROCESSING;
-            //     }
-            //     // }
-            //     break;
-            // case STATE_PROCESSING:
-            //     if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
-            //         state = STATE_PROCESSING;
-            //         action = ACTION_GET_DEFAULT_SINK;
-            //     }
-            //     break;
             case SET_DEFAULT_SINK_VOLUME:
+                if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
+                    pa_operation_unref(pa_op);
+
+                    ClearOperationInProgress();
+                }
+                break;
+            case EXITING:
                 if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
                     pa_operation_unref(pa_op);
                     pa_context_disconnect(pa_ctx);
@@ -372,6 +547,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
         // or not the iteration should block until something is ready to be
         // done.  Set it to zero for non-blocking.
         pa_mainloop_iterate(pa_ml, 1, NULL);
+        
     }
 }
 
