@@ -2,7 +2,33 @@
 #include <string.h>
 #include <pulse/pulseaudio.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdatomic.h>
+
+#define SMALL_STR_LEN 128
+
+enum
+{
+    ACTION_INCORRECT = 0,
+    ACTION_INC5  = 0b000001,
+    ACTION_DEC5  = 0b000010,
+    ACTION_INC1  = 0b000100,
+    ACTION_DEC1  = 0b001000,
+    ACTION_SET24 = 0b010000,
+    ACTION_SET29 = 0b100000,
+};
+
+enum {
+    STATE_INCORRECT = 0,
+    STATE_INIT = 11,
+    STATE_INITALIZED = 12,
+    GET_SERVER = 6,
+    GET_DEFAULT_SINK_INFO = 7,
+    GET_DEFAULT_SINK_VOLUME = 8,
+    SET_DEFAULT_SINK_VOLUME = 9,
+    GET_SINK_INFO = 13,
+    EXITING = 10
+};
 
 // Field list is here: http://0pointer.de/lennart/projects/pulseaudio/doxygen/structpa__sink__info.html
 typedef struct pa_devicelist {
@@ -23,10 +49,34 @@ typedef struct {
     float percentVolume;
 } mySinkInputInfo;
 
+
+typedef struct {
+    int action;
+
+    sem_t actionReady;
+    sem_t actionConsumed;
+    int initial;
+    pa_mainloop* mainloop;
+} ItcStruct;
+
+typedef struct {
+    uint32_t set;
+    uint32_t index;
+    pa_volume_t volume;
+    pa_cvolume cvolume;
+} smallerSinkInfo;
+
+typedef struct {
+    int state;
+    int initialized;
+    char defaultSinkName[SMALL_STR_LEN];
+    smallerSinkInfo defaultSink;
+} OperationState;
+
+
 void pa_state_cb(pa_context *c, void *userdata);
 void pa_sinklist_cb(pa_context *c, const pa_sink_info *l, int eol, void *userdata);
 void pa_sourcelist_cb(pa_context *c, const pa_source_info *l, int eol, void *userdata);
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action, IpcStruct*);
 
 void pa_sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata);
 
@@ -53,47 +103,24 @@ void pa_sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, 
 // 1. Zmiana głośności sink inputa youtuba (może się resetować przy zmianie filmu, bo zmiana nie pochodzi z ui)
 // 2. 
 
-enum
-{
-    ACTION_INCORRECT = 0,
-    ACTION_INC5  = 0b000001,
-    ACTION_DEC5  = 0b000010,
-    ACTION_INC1  = 0b000100,
-    ACTION_DEC1  = 0b001000,
-    ACTION_SET24 = 0b010000,
-    ACTION_SET29 = 0b100000,
-};
 
-typedef struct {
-    int action;
-    pthread_mutex_t actionMutex;
-
-    atomic_bool operationInProcess;
-    pthread_mutex_t operationMutex;
-
-    pthread_mutex_t mainloopMutex;
-
-    pthread_mutex_t inputThreadSignal;
-    pthread_mutex_t mainloopActionSignal;
-
-    // exp
-    // pthread_cond_t 
-} IpcStruct;
-
-void setAction(IpcStruct* ipc, int action);
-int WaitForAction();
-void SetOperationInProgress();
-void ClearOperationInProgress();
+void setAction(ItcStruct* itc, int action);
+int WaitForAction(ItcStruct* itc);
+void OperationCompleted(ItcStruct* itc);
+int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action, ItcStruct*);
 
 void* inputThread(void* arg)
 {
-    IpcStruct* ipc = (IpcStruct*)arg;
+    ItcStruct* itc = (ItcStruct*)arg;
+    assert(itc);
+
     int running = 1;
     char actionChar = '\0';
     int action;
     while(running)
     {
         action = ACTION_INCORRECT;
+        printf("> ");
         int nGot = scanf("%c", &actionChar);
         if (nGot == 1)
         {
@@ -106,12 +133,8 @@ void* inputThread(void* arg)
             else if (actionChar == '\n') { continue; }
             else if (actionChar == 'q') { return NULL; }
             
-            printf("[input] cs enter\n");
-            setAction(ipc, action);
-            printf("[input] cs exit\n");
-
             printf("got '%c', ", actionChar);
-            printf("Action: ");
+            printf("Sending action: ");
             switch (action)
             {
                 case ACTION_INC5: printf("ACTION_INC5"); break;
@@ -123,86 +146,64 @@ void* inputThread(void* arg)
                 default:
             }
             printf("\n");
+
+            setAction(itc, action);
         }
     }
 }
 
-// void mainloopAquire(IpcStruct* ipc);
-// void mainloopRelease(IpcStruct* ipc);
+// void mainloopAquire(ItcStruct* itc);
+// void mainloopRelease(ItcStruct* itc);
 
-void initInputThread(pthread_t* thread, IpcStruct* ipc)
+void initInputThread(pthread_t* thread, ItcStruct* itc)
 {
-    assert(thread && ipc);
-
-    atomic_init(&ipc->operationInProcess, 0);
-    if (   pthread_mutex_init(&ipc->mainloopMutex, NULL)
-        || pthread_mutex_init(&ipc->operationMutex, NULL)
-        || pthread_mutex_init(&ipc->actionMutex, NULL)
-        || pthread_mutex_init(&ipc->mainloopActionSignal, NULL)
-        || pthread_mutex_init(&ipc->inputThreadSignal, NULL)
+    assert(thread && itc);
+    if (
+           sem_init(&(itc->actionReady), 0, 0)
+        || sem_init(&(itc->actionConsumed), 0, 1)
     )
     {
-        printf("Failed to initialize ipc\n");
+        printf("Failed to initialize itc\n");
         // exit here;
         return;
     }
     
 
-    if (pthread_create(thread, NULL, inputThread, NULL) != 0)
+    if (pthread_create(thread, NULL, inputThread, (void*)itc) != 0)
     {
         printf("Failed to create input thread\n");
     }
 }
 
-void setAction(IpcStruct* ipc, int action)
+void setAction(ItcStruct* itc, int action)
 {
-    // TODO: Po co tu mutex, jak to jest atomowe?!??!?!
-    // pthread_mutex_lock(&ipc->operationMutex);
-    // int operationValue = atomic_load(&ipc->operationInProcess);
-    // pthread_mutex_unlock(&ipc->operationMutex);
+    // Unlocked by mainloop.
+    sem_wait(&(itc->actionConsumed));
+    // if (!itc->initial)
+    // {
+        // Pulse audio może se blokować jak nic się nie dzieje.
+        pa_mainloop_wakeup(itc->mainloop);
+    // }
 
-    while (atomic_load(&ipc->operationInProcess) == 1)
-    // if (operationValue == 1)
-    {
-        // Unlocked by mainloop.
-        pthread_mutex_lock(&ipc->inputThreadSignal);
-    }
-
-    pthread_mutex_lock(&ipc->actionMutex);
-    ipc->action = action;
-    pthread_mutex_unlock(&ipc->actionMutex);
+    itc->action = action;
+    
     // Signal the mainloop that action is ready to execute.
-    pthread_mutex_unlock(&ipc->mainloopActionSignal);
+    sem_post(&itc->actionReady);
 }
 
-int WaitForAction(IpcStruct* ipc)
+int WaitForAction(ItcStruct* itc)
 {
-    pthread_mutex_lock(&ipc->actionMutex);
-    if (ipc->action != ACTION_INCORRECT)
-    {
-        SetOperationInProgress(ipc);
-        pthread_mutex_unlock(&ipc->actionMutex);
-        return ipc->action;
-    }
-
-    // Unlock mutex before long wait.
-    pthread_mutex_unlock(&ipc->actionMutex);
-    pthread_mutex_lock(&ipc->mainloopActionSignal);
-
-    SetOperationInProgress(ipc);
-    return ipc->action;
-}
-void SetOperationInProgress(IpcStruct* ipc)
-{
-    atomic_store(&ipc->operationInProcess, 1);
+    // TODO: Nie zadziała ze subskrypcjami.
+    // sem_wait(&itc->actionReady);
+    
+    return itc->action;
 }
 
-void ClearOperationInProgress(IpcStruct* ipc)
+void OperationCompleted(ItcStruct* itc)
 {
-    // Unlock input thread.
-
-    atomic_store(&ipc->operationInProcess, 0);
-    pthread_mutex_unlock(&ipc->inputThreadSignal);
+    itc->initial = 0;
+    itc->action = ACTION_INCORRECT;
+    sem_post(&itc->actionConsumed);
 }
 
 int main(int argc, char *argv[]) {
@@ -228,11 +229,12 @@ int main(int argc, char *argv[]) {
 
     // pa_context_subscribe();
     pthread_t inputThread;
-    IpcStruct ipc = {0};
-    initInputThread(&inputThread, &ipc);
+    ItcStruct itc = {0};
+    itc.initial = 1;
+    initInputThread(&inputThread, &itc);
 
 
-    if (pa_get_devicelist(pa_input_devicelist, pa_output_devicelist, sinkInputInfoList, action, &ipc) < 0) {
+    if (pa_get_devicelist(pa_input_devicelist, pa_output_devicelist, sinkInputInfoList, action, &itc) < 0) {
         fprintf(stderr, "failed to get device list\n");
         return 1;
     }
@@ -291,22 +293,17 @@ pa_operation* GetSinkInputs(pa_context *pa_ctx, mySinkInputInfo* sinkInputs, int
     (*state)++;
 }
 
-#define SMALL_STR_LEN 128
+
 
 void server_info_cb(pa_context *c, const pa_server_info*i, void *userdata)
 {
+    OperationState* os = userdata;
     if (userdata)
     {
-        strncpy((char*)userdata, i->default_sink_name, SMALL_STR_LEN - 1);
+        strncpy(os->defaultSinkName, i->default_sink_name, SMALL_STR_LEN - 1);
     }
 }
 
-typedef struct {
-    uint32_t set;
-    uint32_t index;
-    pa_volume_t volume;
-    pa_cvolume cvolume;
-} smallerSinkInfo;
 
 void sink_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
 {
@@ -320,21 +317,21 @@ void sink_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
         return;
     }
 
-    smallerSinkInfo* info = (smallerSinkInfo*)userdata;
+    OperationState* os = userdata;
     if (i == NULL)
     {
         printf("Sink with that name is null, eol: %d\n", eol);
         return;
     }
 
-    info->index = i->index;
-    info->volume = pa_cvolume_avg(&(i->volume));
-    info->cvolume.channels = i->volume.channels;
+    os->defaultSink.index = i->index;
+    os->defaultSink.volume = pa_cvolume_avg(&(i->volume));
+    os->defaultSink.cvolume.channels = i->volume.channels;
     for (int index = 0; index < i->volume.channels; index++)
     {
-        info->cvolume.values[index] = i->volume.values[index];
+        os->defaultSink.cvolume.values[index] = i->volume.values[index];
     }
-    info->set = 1;
+    os->defaultSink.set = 1;
 }
 
 void set_volume_success_cb(pa_context *c, int success, void *userdata)
@@ -409,12 +406,124 @@ void setVolume(pa_cvolume* cvolume, int action)
     );
 }
 
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action, IpcStruct* ipc) {
+int isOperation(pa_operation* pa_op)
+{
+    if (pa_op) {
+        if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE)
+        {
+            pa_operation_unref(pa_op);
+        }
+        else
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+
+
+int NextState(OperationState* s)
+{
+    // 1. Request operation() (ethier by subscription event, or user input)
+    // 2. Store operation info/steps in OperationState.operation
+    // 3. In callback call OperationComplete() to move to the next step, or finish.
+    /*
+        for example:
+
+        RequestOperation(os, INC_DEF_SINK_BY_5);
+        1. if !os.operation.active -> os.operation.active = 1;
+           else drop it (later queue operations)
+           os.operation.type = INC_DEF_SINK_BY_5;
+           OperationComplete(os)
+        2. from OperationComplete()
+           switch (os.operation.type)
+           case INC_DEF_SINK_BY_5:
+           if !os.defaultSink.name -> os.operation.state = GET_SERVER
+           else if !os.defaultSink.name -> ... <- we get name
+           else if !os.defaultSink.id -> os.operation.state = GET_SINK_INFO <- we get info (id, volume)
+           else os.operation.state = GET_SINK_VOL
+        3. State read by mainloop, and doing shit.
+    */
+    switch (s->state)
+    {
+        case STATE_INCORRECT:
+            if (s->initialized != 1)
+            {
+                // If op is beeing processed, then the state code won't be executed.
+                return STATE_INIT;
+            }
+        case STATE_INIT:
+        case GET_SERVER:
+        case GET_DEFAULT_SINK_INFO:
+        case GET_DEFAULT_SINK_VOLUME:
+        case SET_DEFAULT_SINK_VOLUME:
+            if (s->defaultSinkName[0] == '\0')
+            {
+                return GET_SERVER;
+            }
+            else if (!s->defaultSink.set)
+            {
+                return GET_DEFAULT_SINK_INFO;
+            }
+            else if (s->state == GET_DEFAULT_SINK_INFO)
+            {
+                return GET_DEFAULT_SINK_VOLUME;
+            }
+            else if (s->state == GET_DEFAULT_SINK_VOLUME)
+            {
+                return SET_DEFAULT_SINK_VOLUME;
+            }
+            else if (s->state == SET_DEFAULT_SINK_VOLUME)
+            {
+                return GET_DEFAULT_SINK_VOLUME;
+            }
+        // case GET_SERVER:
+        // case GET_DEFAULT_SINK_INFO:
+        //     return GET_DEFAULT_SINK_VOLUME;
+        // case GET_DEFAULT_SINK_VOLUME:
+        //     return SET_DEFAULT_SINK_VOLUME;
+        // case SET_DEFAULT_SINK_VOLUME:
+        //     return GET_DEFAULT_SINK_VOLUME;
+    }
+
+    return STATE_INCORRECT;
+}
+
+void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t idx, void *userdata)
+{
+    // PA_SUBSCRIPTION_EVENT_FACILITY_MASK  <- kind of object
+    // PA_SUBSCRIPTION_EVENT_TYPE_MASK      <- what happened
+    int objectType = t & PA_SUBSCRIPTION_EVENT_FACILITY_MASK;
+    int event      = t & PA_SUBSCRIPTION_EVENT_TYPE_MASK;
+    
+    printf("[subscribe] obj: %2x, event: %2x, id: %d\n", objectType, event, idx);
+    // OperationState* operation = (OperationState *)userdata;
+    // if (operation->state == STATE_INITALIZED)
+    // {
+    //     operation->;
+    // }
+    // prolly pass to userdata and make request in mainloop. :/
+}
+
+void context_success_cb(pa_context *c, int success, void *userdata)
+{
+    OperationState* operationState = (OperationState*)userdata;
+    operationState->initialized = success ? 1 : -1;
+    // *(int *)userdata = success;
+    printf("Set subscribe success: %d\n", success);
+}
+
+
+
+int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action, ItcStruct* itc) {
     // Define our pulse audio loop and connection variables
     pa_mainloop *pa_ml;
     pa_mainloop_api *pa_mlapi;
     pa_operation *pa_op = NULL;
     pa_context *pa_ctx;
+    OperationState operationState = {0};
+    operationState.state = STATE_INCORRECT;
 
     // We'll need these state variables to keep track of our requests
     // #define STATE_INIT 5
@@ -424,18 +533,14 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
     // #define ACTION_GET_SINK_INPUTS 3
     // #define ACTION_GET_DEFAULT_SINK 4
 
-    #define GET_SERVER 6
-    #define GET_DEFAULT_SINK_INFO 7
-    #define GET_DEFAULT_SINK_VOLUME 8
-    #define SET_DEFAULT_SINK_VOLUME 9
-    #define EXITING 10
+    
 
     // Get server params
     // Get default sink name
     // Get default sink volume
     // Set default sink volume +5%
 
-    int state = GET_SERVER;
+    // int state = STATE_INIT;
     int pa_ready = 0;
 
     char defaultSinkName[128] = {0};
@@ -450,6 +555,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
     pa_ml = pa_mainloop_new();
     pa_mlapi = pa_mainloop_get_api(pa_ml);
     pa_ctx = pa_context_new(pa_mlapi, "test");
+    itc->mainloop = pa_ml;
 
     // This function connects to the pulse server
     pa_context_connect(pa_ctx, NULL, 0, NULL);
@@ -460,22 +566,26 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
     // ready.
     // If there's an error, the callback will set pa_ready to 2
     pa_context_set_state_callback(pa_ctx, pa_state_cb, &pa_ready);
+    pa_context_set_subscribe_callback(pa_ctx, subscribe_cb, NULL);
 
     // Now we'll enter into an infinite loop until we get the data we receive
     // or if there's an error
+    // pa_mainloop_run(pa_ml);
+    // return;
+
+    action = ACTION_INCORRECT;
     for (;;) {
 
-        int action = WaitForAction();
-        // SetOperationInProgress(); // To się wywołuje w wait for action
+        // Iterate the main loop and go again.  The second argument is whether
+        // or not the iteration should block until something is ready to be
+        // done.  Set it to zero for non-blocking.
+        pa_mainloop_iterate(pa_ml, 1, NULL);
 
-        // loop
-
-        // Clear operation in progress
 
         // We can't do anything until PA is ready, so just iterate the mainloop
         // and continue
         if (pa_ready == 0) {
-            pa_mainloop_iterate(pa_ml, 1, NULL);
+            // pa_mainloop_iterate(pa_ml, 1, NULL);
             continue;
         }
         // We couldn't get a connection to the server, so exit out
@@ -485,48 +595,94 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
             pa_mainloop_free(pa_ml);
             return -1;
         }
+        else
+        {
+            printf("pa_ready %d\n", pa_ready);
+        }
+
+        if ((operationState.state != STATE_INIT && operationState.state != STATE_INCORRECT) && action == ACTION_INCORRECT)
+        {
+            printf("Waiting for action\n");
+            action = WaitForAction(itc);
+            if (action == ACTION_INCORRECT)
+            {
+                printf("action incorrect\n");
+                continue;
+            }
+            printf("action aquired: %x\n", action);
+        }
+        
+        operationState.state = NextState(&operationState);
+        printf("got state: %d\n", operationState.state);
         // At this point, we're connected to the server and ready to make
         // requests
-        switch (state) {
+        switch (operationState.state) {
+            case STATE_INIT:
+                if (isOperation(pa_op))
+                {
+                    break;
+                }
+
+                pa_op = pa_context_subscribe(
+                    pa_ctx, 
+                      PA_SUBSCRIPTION_MASK_SINK_INPUT
+                    | PA_SUBSCRIPTION_MASK_SINK,
+                    context_success_cb,
+                    (void*)&operationState);
+                // state = GET_SERVER;
+                break;
             case GET_SERVER:
-                pa_op = pa_context_get_server_info(pa_ctx, server_info_cb, (void *)defaultSinkName);
-                state = GET_DEFAULT_SINK_INFO;
+                if (isOperation(pa_op))
+                {
+                    break;
+                }
+                pa_op = pa_context_get_server_info(pa_ctx, server_info_cb, (void *)&operationState);
+                // state = GET_DEFAULT_SINK_INFO;
             break;
             case GET_DEFAULT_SINK_INFO:
-                if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
-                    pa_operation_unref(pa_op);
-                    printf("Default sink name: '%s'\n", defaultSinkName);
-                    pa_op = pa_context_get_sink_info_by_name(pa_ctx, defaultSinkName, sink_info_cb, (void *)&defaultSinkInfo);
-                    state = GET_DEFAULT_SINK_VOLUME;
-                }
+                    if (isOperation(pa_op))
+                    {
+                        break;
+                    }
+                    printf("Default sink name: '%s'\n", operationState.defaultSinkName);
+                    pa_op = pa_context_get_sink_info_by_name(pa_ctx, operationState.defaultSinkName, sink_info_cb, (void *)&operationState);
+                    // state = GET_DEFAULT_SINK_VOLUME;
                 break;
             case GET_DEFAULT_SINK_VOLUME:
-                if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
-                    pa_operation_unref(pa_op);
-                    if (defaultSinkInfo.set)
-                    {
-                        printf("Default sink index: %d\n", defaultSinkInfo.index);
-                        setVolume(&defaultSinkInfo.cvolume, action);
-                        pa_op = pa_context_set_sink_volume_by_index(pa_ctx, defaultSinkInfo.index, &defaultSinkInfo.cvolume, set_volume_success_cb, NULL);
-                    }
-                    else
-                    {
-                        printf("Default sink info not set\n");
-                        pa_operation_unref(pa_op);
-                        pa_context_disconnect(pa_ctx);
-                        pa_context_unref(pa_ctx);
-                        pa_mainloop_free(pa_ml);
-                        return 0;
-                    }
-                    state = SET_DEFAULT_SINK_VOLUME;
-
+                if (isOperation(pa_op))
+                {
+                    break;
                 }
+
+                if (operationState.defaultSink.set)
+                {
+                    printf("Default sink index: %d\n", operationState.defaultSink.index);
+                    setVolume(&operationState.defaultSink.cvolume, action);
+                    pa_op = pa_context_set_sink_volume_by_index(pa_ctx, operationState.defaultSink.index, &operationState.defaultSink.cvolume, set_volume_success_cb, &operationState);
+                }
+                else
+                {
+                    printf("Default sink info not set\n");
+                    pa_operation_unref(pa_op);
+                    pa_context_disconnect(pa_ctx);
+                    pa_context_unref(pa_ctx);
+                    pa_mainloop_free(pa_ml);
+                    return 0;
+                }
+                // state = SET_DEFAULT_SINK_VOLUME;
+                break;
             case SET_DEFAULT_SINK_VOLUME:
-                if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
-                    pa_operation_unref(pa_op);
-
-                    ClearOperationInProgress();
-                }
+                    if (isOperation(pa_op))
+                    {
+                        break;
+                    }
+                    pa_op = NULL;
+                    
+                    // TODO: botch, just for thread input testing.
+                    //       rework when subscriptions.
+                    // STATE_INITstate = GET_DEFAULT_SINK_VOLUME;
+                    action = ACTION_INCORRECT;
+                    OperationCompleted(itc);
                 break;
             case EXITING:
                 if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
@@ -540,42 +696,14 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
 
             default:
                 // We should never see this state
-                fprintf(stderr, "in state %d\n", state);
-                return -1;
+                fprintf(stderr, "in state %d\n", operationState.state);
+                // return -1;
         }
-        // Iterate the main loop and go again.  The second argument is whether
-        // or not the iteration should block until something is ready to be
-        // done.  Set it to zero for non-blocking.
-        pa_mainloop_iterate(pa_ml, 1, NULL);
-        
     }
 }
 
 void pa_sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata)
 {
-    // typedef struct pa_sink_input_info {
-    //     uint32_t index;                      /**< Index of the sink input */
-    //     const char *name;                    /**< Name of the sink input */
-    //     uint32_t owner_module;               /**< Index of the module this sink input belongs to, or PA_INVALID_INDEX when it does not belong to any module. */
-    //     uint32_t client;                     /**< Index of the client this sink input belongs to, or PA_INVALID_INDEX when it does not belong to any client. */
-    //     uint32_t sink;                       /**< Index of the connected sink */
-    //     pa_sample_spec sample_spec;          /**< The sample specification of the sink input. */
-    //     pa_channel_map channel_map;          /**< Channel map */
-    //     pa_cvolume volume;                   /**< The volume of this sink input. */
-    //     pa_usec_t buffer_usec;               /**< Latency due to buffering in sink input, see pa_timing_info for details. */
-    //     pa_usec_t sink_usec;                 /**< Latency of the sink device, see pa_timing_info for details. */
-    //     const char *resample_method;         /**< The resampling method used by this sink input. */
-    //     const char *driver;                  /**< Driver name */
-    //     int mute;                            /**< Stream muted \since 0.9.7 */
-    //     pa_proplist *proplist;               /**< Property list \since 0.9.11 */
-    //     int corked;                          /**< Stream corked \since 1.0 */
-    //     int has_volume;                      /**< Stream has volume. If not set, then the meaning of this struct's volume member is unspecified. \since 1.0 */
-    //     int volume_writable;                 /**< The volume can be set. If not set, the volume can still change even though clients can't control the volume. \since 1.0 */
-    //     pa_format_info *format;              /**< Stream format information. \since 1.0 */
-    // } pa_sink_input_info;
-
-    // pa_proplist_gets
-    // pa_proplist_contains
     mySinkInputInfo *sinkInputInfoList = userdata;
     int ctr = 0;
 
