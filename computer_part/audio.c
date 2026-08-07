@@ -9,25 +9,33 @@
 
 enum
 {
-    ACTION_INCORRECT = 0,
-    ACTION_INC5  = 0b000001,
-    ACTION_DEC5  = 0b000010,
-    ACTION_INC1  = 0b000100,
-    ACTION_DEC1  = 0b001000,
-    ACTION_SET24 = 0b010000,
-    ACTION_SET29 = 0b100000,
+    ACTION_INCORRECT    = 0,
+    ACTION_INC5         = 0b0000001,
+    ACTION_DEC5         = 0b0000010,
+    ACTION_INC1         = 0b0000100,
+    ACTION_DEC1         = 0b0001000,
+    ACTION_SET24        = 0b0010000,
+    ACTION_SET29        = 0b0100000,
+    ACTION_VOLUME_SET_MASK  = 0b0111111,
+    ACTION_UPDATE_OBJ   = 0b1000000,
 };
 
 enum {
     STATE_INCORRECT = 0,
     STATE_INIT = 11,
-    STATE_INITALIZED = 12,
+    // STATE_INITALIZED = 12,
     GET_SERVER = 6,
     GET_DEFAULT_SINK_INFO = 7,
     GET_DEFAULT_SINK_VOLUME = 8,
     SET_DEFAULT_SINK_VOLUME = 9,
     GET_SINK_INFO = 13,
-    EXITING = 10
+    EXITING = 10,
+
+    // NEW concept
+    // STATE_INCORRECT = ,
+    STATE_UPDATING_OBJECTS = 14,
+    STATE_INITIALIZED = 15,
+    STATE_SETTING_VOLUME = 16,
 };
 
 // Field list is here: http://0pointer.de/lennart/projects/pulseaudio/doxygen/structpa__sink__info.html
@@ -314,10 +322,15 @@ void sink_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
 
     if (eol)
     {
+        printf("eol\n");
         return;
     }
+    else
+    {
+        printf("sink\n");
+    }
 
-    OperationState* os = userdata;
+    OperationState* os = (OperationState*)userdata;
     if (i == NULL)
     {
         printf("Sink with that name is null, eol: %d\n", eol);
@@ -406,12 +419,13 @@ void setVolume(pa_cvolume* cvolume, int action)
     );
 }
 
-int isOperation(pa_operation* pa_op)
+int isOperation(pa_operation** pa_op)
 {
-    if (pa_op) {
-        if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE)
+    if (*pa_op) {
+        if (pa_operation_get_state(*pa_op) == PA_OPERATION_DONE)
         {
-            pa_operation_unref(pa_op);
+            pa_operation_unref(*pa_op);
+            *pa_op = NULL;
         }
         else
         {
@@ -447,17 +461,17 @@ int NextState(OperationState* s)
     */
     switch (s->state)
     {
-        case STATE_INCORRECT:
+        case STATE_INCORRECT: // STATE_INITIALIZING
             if (s->initialized != 1)
             {
                 // If op is beeing processed, then the state code won't be executed.
                 return STATE_INIT;
             }
-        case STATE_INIT:
-        case GET_SERVER:
-        case GET_DEFAULT_SINK_INFO:
-        case GET_DEFAULT_SINK_VOLUME:
-        case SET_DEFAULT_SINK_VOLUME:
+        case STATE_INIT: // STATE_INITIALIZED
+        case GET_SERVER: // STATE_GETTING_SERVER_INFO
+        case GET_DEFAULT_SINK_INFO: // STATE_GETTING_DEFAULT_SINK_INFO // -> allow getting generic sink info
+        case GET_DEFAULT_SINK_VOLUME: // STATE_SETTING_VOLUME
+        case SET_DEFAULT_SINK_VOLUME: // -> STATE_INITIALIZED
             if (s->defaultSinkName[0] == '\0')
             {
                 return GET_SERVER;
@@ -478,14 +492,14 @@ int NextState(OperationState* s)
             {
                 return GET_DEFAULT_SINK_VOLUME;
             }
-        // case GET_SERVER:
-        // case GET_DEFAULT_SINK_INFO:
-        //     return GET_DEFAULT_SINK_VOLUME;
-        // case GET_DEFAULT_SINK_VOLUME:
-        //     return SET_DEFAULT_SINK_VOLUME;
-        // case SET_DEFAULT_SINK_VOLUME:
-        //     return GET_DEFAULT_SINK_VOLUME;
     }
+
+    /*
+        STATE_INCORRECT, -> (setting subscriptions, getting default sink name/id/volume, sink_inputs)
+        STATE_UPDATING_OBJECTS -> (because of subscription event)
+        STATE_INITIALIZED,
+        STATE_SETTING_VOLUME/MODIFYING_OBJECTS
+    */
 
     return STATE_INCORRECT;
 }
@@ -600,7 +614,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
             printf("pa_ready %d\n", pa_ready);
         }
 
-        if ((operationState.state != STATE_INIT && operationState.state != STATE_INCORRECT) && action == ACTION_INCORRECT)
+        if ((operationState.state != STATE_INCORRECT) && action == ACTION_INCORRECT)
         {
             printf("Waiting for action\n");
             action = WaitForAction(itc);
@@ -612,77 +626,138 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
             printf("action aquired: %x\n", action);
         }
         
-        operationState.state = NextState(&operationState);
+        // operationState.state = NextState(&operationState);
         printf("got state: %d\n", operationState.state);
         // At this point, we're connected to the server and ready to make
         // requests
         switch (operationState.state) {
-            case STATE_INIT:
-                if (isOperation(pa_op))
+            case STATE_INCORRECT: // Need to set up stuff
+                if (isOperation(&pa_op))
                 {
+                    break;
+                }
+                
+                // Setting subscription.
+                if (!operationState.initialized)
+                {
+                    // initialize stuff
+                    pa_op = pa_context_subscribe(
+                        pa_ctx, 
+                        PA_SUBSCRIPTION_MASK_SINK_INPUT
+                        | PA_SUBSCRIPTION_MASK_SINK,
+                        context_success_cb,
+                        (void*)&operationState);
                     break;
                 }
 
-                pa_op = pa_context_subscribe(
-                    pa_ctx, 
-                      PA_SUBSCRIPTION_MASK_SINK_INPUT
-                    | PA_SUBSCRIPTION_MASK_SINK,
-                    context_success_cb,
-                    (void*)&operationState);
-                // state = GET_SERVER;
-                break;
-            case GET_SERVER:
-                if (isOperation(pa_op))
+                // Getting default sink info
+                if (operationState.defaultSinkName[0] == '\0')
                 {
+                    pa_op = pa_context_get_server_info(pa_ctx, server_info_cb, (void *)&operationState);
                     break;
                 }
-                pa_op = pa_context_get_server_info(pa_ctx, server_info_cb, (void *)&operationState);
-                // state = GET_DEFAULT_SINK_INFO;
-            break;
-            case GET_DEFAULT_SINK_INFO:
-                    if (isOperation(pa_op))
-                    {
-                        break;
-                    }
+
+                if (!operationState.defaultSink.set)
+                {
                     printf("Default sink name: '%s'\n", operationState.defaultSinkName);
                     pa_op = pa_context_get_sink_info_by_name(pa_ctx, operationState.defaultSinkName, sink_info_cb, (void *)&operationState);
-                    // state = GET_DEFAULT_SINK_VOLUME;
+                    break;
+                }
+
+                printf("state initialized, default sink[%d] vol: %2f\n", operationState.defaultSink.index, (double)pa_cvolume_avg(&operationState.defaultSink.cvolume) / PA_VOLUME_NORM * 100.0);
+                operationState.state = STATE_INITIALIZED;
+                // state = GET_SERVER;
                 break;
-            case GET_DEFAULT_SINK_VOLUME:
-                if (isOperation(pa_op))
+            // case STATE_INITIALIZING:
+            // idk if something to do there.
+            case STATE_INITIALIZED: // STATE_INITIALIZED
+                if (isOperation(&pa_op))
                 {
                     break;
                 }
 
-                if (operationState.defaultSink.set)
+                if (action & ACTION_VOLUME_SET_MASK)
                 {
-                    printf("Default sink index: %d\n", operationState.defaultSink.index);
-                    setVolume(&operationState.defaultSink.cvolume, action);
-                    pa_op = pa_context_set_sink_volume_by_index(pa_ctx, operationState.defaultSink.index, &operationState.defaultSink.cvolume, set_volume_success_cb, &operationState);
+                    if (operationState.defaultSink.set)
+                    {
+                        printf("Default sink index: %d\n", operationState.defaultSink.index);
+                        setVolume(&operationState.defaultSink.cvolume, action);
+                        pa_op = pa_context_set_sink_volume_by_index(
+                            pa_ctx, 
+                            operationState.defaultSink.index, 
+                            &operationState.defaultSink.cvolume, 
+                            set_volume_success_cb, 
+                            &operationState);
+                        operationState.state = STATE_SETTING_VOLUME;
+                        break;
+                    }
+                    else
+                    {
+                        printf("Default sink info not set\n");
+                        // state -> INCORRECT?/UPDATING_OBJECTS
+
+                        // pa_operation_unref(pa_op);
+                        // pa_context_disconnect(pa_ctx);
+                        // pa_context_unref(pa_ctx);
+                        // pa_mainloop_free(pa_ml);
+                        // return 0;
+                    }
                 }
                 else
                 {
-                    printf("Default sink info not set\n");
-                    pa_operation_unref(pa_op);
-                    pa_context_disconnect(pa_ctx);
-                    pa_context_unref(pa_ctx);
-                    pa_mainloop_free(pa_ml);
-                    return 0;
+
                 }
-                // state = SET_DEFAULT_SINK_VOLUME;
-                break;
-            case SET_DEFAULT_SINK_VOLUME:
-                    if (isOperation(pa_op))
+                // Here check what we want to do.
+                // if (action != ACTION_INCORRECT) // I think that should do it.
+                // pa_op = pa_context_get_server_info(pa_ctx, server_info_cb, (void *)&operationState);
+                // state should be changed here xd.
+                // state = STATE_GETTING_SERVER_INFO;
+            break;
+            // case GET_DEFAULT_SINK_INFO: // STATE_GETTING_SERVER_INFO
+            //         if (isOperation(pa_op))
+            //         {
+            //             break;
+            //         }
+            //         // printf("Default sink name: '%s'\n", operationState.defaultSinkName);
+            //         // pa_op = pa_context_get_sink_info_by_name(pa_ctx, operationState.defaultSinkName, sink_info_cb, (void *)&operationState);
+            //         // state = GET_DEFAULT_SINK_VOLUME;
+            //     break;
+            // case GET_DEFAULT_SINK_VOLUME:
+            //     if (isOperation(pa_op))
+            //     {
+            //         break;
+            //     }
+
+            //     if (operationState.defaultSink.set)
+            //     {
+            //         printf("Default sink index: %d\n", operationState.defaultSink.index);
+            //         setVolume(&operationState.defaultSink.cvolume, action);
+            //         pa_op = pa_context_set_sink_volume_by_index(pa_ctx, operationState.defaultSink.index, &operationState.defaultSink.cvolume, set_volume_success_cb, &operationState);
+            //     }
+            //     else
+            //     {
+            //         printf("Default sink info not set\n");
+            //         pa_operation_unref(pa_op);
+            //         pa_context_disconnect(pa_ctx);
+            //         pa_context_unref(pa_ctx);
+            //         pa_mainloop_free(pa_ml);
+            //         return 0;
+            //     }
+            //     // state = SET_DEFAULT_SINK_VOLUME;
+            //     break;
+            case STATE_SETTING_VOLUME:
+                    if (isOperation(&pa_op))
                     {
                         break;
                     }
-                    pa_op = NULL;
+                    // pa_op = NULL;
                     
                     // TODO: botch, just for thread input testing.
                     //       rework when subscriptions.
                     // STATE_INITstate = GET_DEFAULT_SINK_VOLUME;
                     action = ACTION_INCORRECT;
                     OperationCompleted(itc);
+                    operationState.state = STATE_INITIALIZED;
                 break;
             case EXITING:
                 if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
