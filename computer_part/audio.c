@@ -6,6 +6,9 @@
 #include <stdatomic.h>
 
 #define SMALL_STR_LEN 128
+#define MEDIUM_STR_LEN 256
+#define SINK_INPUTS_N 16
+#define OPERATIONS_N 16
 
 enum
 {
@@ -39,17 +42,6 @@ typedef struct pa_devicelist {
         char description[256];
 } pa_devicelist_t;
 
-typedef struct {
-    uint32_t initialized;
-    uint32_t index;                      /**< Index of the sink input */
-    char name[128];
-
-    char mediaName[256];
-    char appName[256];
-    uint32_t volume;
-    float percentVolume;
-} mySinkInputInfo;
-
 
 typedef struct {
     int action;
@@ -65,29 +57,64 @@ typedef struct {
     uint32_t index;
     pa_volume_t volume;
     pa_cvolume cvolume;
-} smallerSinkInfo;
+} SmallerSinkInfo;
+
+typedef struct {
+    uint32_t initialized;
+    uint32_t index;                      /**< Index of the sink input */
+    char name[SMALL_STR_LEN];
+
+    char mediaName[MEDIUM_STR_LEN];
+    char appName[MEDIUM_STR_LEN];
+    pa_cvolume volume;
+} SinkInputInfo;
 
 typedef struct
 {
+    uint32_t taken;
     uint32_t objIndex;
     pa_subscription_event_type_t objType;
+    pa_subscription_event_type_t eventType;
 } OperationParams;
+
+typedef struct 
+{
+    uint32_t front;
+    uint32_t back;
+    OperationParams data[OPERATIONS_N];
+} OperationParamsCb;
+
 typedef struct {
     int state;
     int initialized;
     char defaultSinkName[SMALL_STR_LEN];
-    smallerSinkInfo defaultSink;
+    SmallerSinkInfo defaultSink;
+    
+    SinkInputInfo sinkInputs[SINK_INPUTS_N];
 
     OperationParams params;
+    OperationParamsCb operations;
     ItcStruct* itc;
 } OperationState;
 
 
+// Allocates new element on the queue, and returns pointer to it.
+// Null if queue is full.
+OperationParams* operations_cb_nextFree(OperationParamsCb* buffer);
+// Removes element from front.
+void operations_cb_pop(OperationParamsCb* buffer);
+// Returns pointer to oldest element.
+OperationParams* operations_cb_front(OperationParamsCb* buffer);
+// N element on the queue.
+uint32_t operations_cb_size(OperationParamsCb* buffer);
+void operationsCbTests();
+
+void printSinkInput(SinkInputInfo* info);
 void pa_state_cb(pa_context *c, void *userdata);
 void pa_sinklist_cb(pa_context *c, const pa_sink_info *l, int eol, void *userdata);
 void pa_sourcelist_cb(pa_context *c, const pa_source_info *l, int eol, void *userdata);
 
-void pa_sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata);
+void sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata);
 void UpdateObject(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType);
 
 
@@ -116,7 +143,7 @@ void UpdateObject(OperationState* operationState, uint32_t id, pa_subscription_e
 void setAction(ItcStruct* itc, int action);
 int WaitForAction(ItcStruct* itc);
 void OperationCompleted(ItcStruct* itc);
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action, ItcStruct*);
+int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInputInfo* sinkInputs, int action, ItcStruct*);
 
 void* inputThread(void* arg)
 {
@@ -216,6 +243,9 @@ void OperationCompleted(ItcStruct* itc)
 }
 
 int main(int argc, char *argv[]) {
+    operationsCbTests();
+    return 0;
+
     int action = ACTION_INC1;
     if (argc > 1)
     {
@@ -234,7 +264,7 @@ int main(int argc, char *argv[]) {
 
     // This is where we'll store the output device list
     pa_devicelist_t pa_output_devicelist[16];
-    mySinkInputInfo sinkInputInfoList[16];
+    SinkInputInfo sinkInputInfoList[16];
 
     // pa_context_subscribe();
     pthread_t inputThread;
@@ -270,37 +300,21 @@ int main(int argc, char *argv[]) {
         printf("\n");
     }
 
-    for (ctr = 0; ctr < 16; ctr++) {
-        if (! sinkInputInfoList[ctr].initialized) {
-            break;
-        }
-        mySinkInputInfo* sinkInput = &(sinkInputInfoList[ctr]);
-
-        printf("=======[ Sink Input #%d ]=======\n", ctr+1);
-        printf("Name: %s\n", sinkInput->name);
-        printf("Application name: %s\n", sinkInput->appName);
-        printf("Media name: %s\n", sinkInput->mediaName);
-        printf("Volume: %d\n", sinkInput->volume);
-        printf("Volume: %f\n", sinkInput->percentVolume);
-        printf("Index: %d\n", sinkInput->index);
-        printf("\n");
-    }
-
     pthread_join(inputThread, NULL);
 
     return 0;
 }
 
-pa_operation* GetSinkInputs(pa_context *pa_ctx, mySinkInputInfo* sinkInputs, int* state)
-{
-    return pa_context_get_sink_input_info_list(
-        pa_ctx,
-        pa_sink_input_info_cb,
-        sinkInputs
-    );
-    // Update the state so we know what to do next
-    (*state)++;
-}
+// pa_operation* GetSinkInputs(pa_context *pa_ctx, SinkInputInfo* sinkInputs, int* state)
+// {
+//     return pa_context_get_sink_input_info_list(
+//         pa_ctx,
+//         pa_sink_input_info_cb,
+//         sinkInputs
+//     );
+//     // Update the state so we know what to do next
+//     (*state)++;
+// }
 
 
 
@@ -496,8 +510,16 @@ void context_success_cb(pa_context *c, int success, void *userdata)
 
 void UpdateObject(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType)
 {
+    // TODO: To spróbuj zrobić
+    // TODO: To spróbuj zrobić
+    // TODO: To spróbuj zrobić
+    // TODO: To spróbuj zrobić
     // TODO: Alternatively prolly just requesting pa_get_sink_info_by_id and unlinking operation will suffice.
     //       (a will be much simpler)
+    // TODO: To spróbuj zrobić
+    // TODO: To spróbuj zrobić
+    // TODO: To spróbuj zrobić
+    // TODO: To spróbuj zrobić
     if (sem_trywait(&(operationState->itc->actionConsumed)) == -1)
     {
         printf("operation in progress. Skipping update\n");
@@ -525,7 +547,7 @@ void UpdateObject(OperationState* operationState, uint32_t id, pa_subscription_e
 // void pa_source_info_cb(pa_context *c, const pa_source_info *i, int eol, void *userdata);
 
 
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInputInfo* sinkInputs, int action, ItcStruct* itc) {
+int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInputInfo* sinkInputs, int action, ItcStruct* itc) {
     // Define our pulse audio loop and connection variables
     pa_mainloop *pa_ml;
     pa_mainloop_api *pa_mlapi;
@@ -539,12 +561,12 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
     int pa_ready = 0;
 
     char defaultSinkName[128] = {0};
-    smallerSinkInfo defaultSinkInfo = {0};
+    SmallerSinkInfo defaultSinkInfo = {0};
 
     // Initialize our device lists
     memset(input, 0, sizeof(pa_devicelist_t) * 16);
     memset(output, 0, sizeof(pa_devicelist_t) * 16);
-    memset(sinkInputs, 0, sizeof(mySinkInputInfo) * 16);
+    memset(sinkInputs, 0, sizeof(SinkInputInfo) * 16);
 
     // Create a mainloop API and connection to the default server
     pa_ml = pa_mainloop_new();
@@ -590,10 +612,6 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
             pa_mainloop_free(pa_ml);
             return -1;
         }
-        else
-        {
-            printf("pa_ready %d\n", pa_ready);
-        }
 
         if ((operationState.state != STATE_INCORRECT) && action == ACTION_INCORRECT)
         {
@@ -607,7 +625,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
             printf("action aquired: %x\n", action);
         }
         
-        printf("got state: %d\n", operationState.state);
+        // printf("got state: %d\n", operationState.state);
         switch (operationState.state) {
             case STATE_INCORRECT: // Need to set up stuff
                 if (isOperation(&pa_op))
@@ -642,7 +660,22 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
                     break;
                 }
 
+                // TODO: To następne
+                // TODO: To następne
+                // TODO: To następne
+                // TODO: To następne
                 // TODO: Get all sink inputs.
+                pa_op = pa_context_get_sink_input_info_list(
+                    pa_ctx,
+                    sink_input_info_cb,
+                    &operationState
+                );
+                pa_operation_unref(pa_op);
+                pa_op = NULL;
+                // TODO: To następne
+                // TODO: To następne
+                // TODO: To następne
+                // TODO: To następne
 
                 printf("state initialized\n");
                 operationState.state = STATE_INITIALIZED;
@@ -690,11 +723,6 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
                 }
             break;
             case STATE_UPDATING_OBJECTS:
-                // if (isOperation(&pa_op))
-                // {
-                //     break;
-                // }
-                // operationState.
             case STATE_SETTING_VOLUME:
                     if (isOperation(&pa_op))
                     {
@@ -731,39 +759,87 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, mySinkInp
     }
 }
 
-void pa_sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata)
+void printSinkInput(SinkInputInfo* info)
 {
-    mySinkInputInfo *sinkInputInfoList = userdata;
-    int ctr = 0;
+    if (info->initialized)
+    {
+        double volumePercent = (double)pa_cvolume_avg(&info->volume) / PA_VOLUME_NORM * 100.0;
+        printf(
+            "=== [SinkInput] ===\n"
+            "index              : %3d\n"
+            "name               : %s\n"
+            "media name         : %s\n"
+            "application name   : %s\n"
+            "volume             : %2.f\n"
+            "===================\n",
+            info->index, 
+            info->name,
+            info->mediaName,
+            info->appName,
+            volumePercent
+        );
+    }
+    // else
+    // {
+    //     printf("")
+    // }
+}
+
+void sink_input_info_cb(pa_context *c, const pa_sink_input_info *info, int eol, void *userdata)
+{
+    // SinkInputInfo *sinkInputInfoList = userdata;
+    OperationState* operationState = userdata;
+    SinkInputInfo* sinkInputList = operationState->sinkInputs;
 
     if (eol > 0) {
         return;
     }
-
-    for (ctr = 0; ctr < 16; ctr++) {
-        if (!sinkInputInfoList[ctr].initialized) {
-            mySinkInputInfo* sink = &(sinkInputInfoList[ctr]);
-            sink->index = i->index;
-            sink->volume = pa_cvolume_avg(&i->volume);
-            sink->percentVolume = ((double)sink->volume / PA_VOLUME_NORM) * 100;
-            // char mediaName[256];
-            // char appName[256];
-
-            strncpy(sink->name, i->name, 127);
-
-            if (pa_proplist_contains(i->proplist, "media.name") == 1)
-            {
-                const char* propStr = pa_proplist_gets(i->proplist, "media.name");
-                strncpy(sink->mediaName, propStr, 255);
-            }
-            if (pa_proplist_contains(i->proplist, "application.name") == 1)
-            {
-                const char* propStr = pa_proplist_gets(i->proplist, "application.name");
-                strncpy(sink->appName, propStr, 255);
-            }
-            sink->initialized = 1;
-            break;
+    
+    SinkInputInfo* sink = NULL;
+    for (int i = 0; i < SINK_INPUTS_N; i++) {
+        if (
+            (operationState->params.eventType == PA_SUBSCRIPTION_EVENT_NEW && !sinkInputList[i].initialized)
+            || (((operationState->params.eventType == PA_SUBSCRIPTION_EVENT_CHANGE) 
+                 || (operationState->params.eventType == PA_SUBSCRIPTION_EVENT_REMOVE)) 
+                 && sinkInputList[i].initialized)
+            )
+        {
+            sink = &(sinkInputList[i]);
         }
+    }
+
+    if (sink)
+    {
+        if (operationState->params.eventType == PA_SUBSCRIPTION_EVENT_REMOVE)
+        {
+            sink->initialized = 0;
+            printf("[SinkInput] removed: %3d\n", sink->index);
+            return;
+        }
+        sink->index = info->index;
+        sink->volume.channels = info->volume.channels;
+        for (int index = 0; index < info->volume.channels; index++)
+        {
+            sink->volume.values[index] = info->volume.values[index];
+        }
+        // char mediaName[256];
+        // char appName[256];
+
+        // TODO: Check if its necessary to copy the strings on update;
+        strncpy(sink->name, info->name, SMALL_STR_LEN - 1);
+
+        if (pa_proplist_contains(info->proplist, "media.name") == 1)
+        {
+            const char* propStr = pa_proplist_gets(info->proplist, "media.name");
+            strncpy(sink->mediaName, propStr, MEDIUM_STR_LEN - 1);
+        }
+        if (pa_proplist_contains(info->proplist, "application.name") == 1)
+        {
+            const char* propStr = pa_proplist_gets(info->proplist, "application.name");
+            strncpy(sink->appName, propStr, MEDIUM_STR_LEN - 1);
+        }
+        sink->initialized = 1;
+        printSinkInput(sink);
     }
 }
 
@@ -838,4 +914,71 @@ void pa_sourcelist_cb(pa_context *c, const pa_source_info *l, int eol, void *use
             break;
         }
     }
+}
+
+
+
+OperationParams* operations_cb_nextFree(OperationParamsCb* buffer)
+{
+    if (operations_cb_size(buffer) < OPERATIONS_N)
+    {
+        OperationParams* freeElem = &buffer->data[buffer->back];
+        buffer->back = (buffer->back + 1) % OPERATIONS_N;
+        return freeElem;
+    }
+
+    return NULL;
+}
+
+void operations_cb_pop(OperationParamsCb* buffer)
+{
+}
+
+OperationParams* operations_cb_front(OperationParamsCb* buffer)
+{
+    return NULL;
+}
+
+uint32_t operations_cb_size(OperationParamsCb* buffer)
+{
+    // |o|o|x|x|x|o|o|o|
+    //      f     b
+    if (buffer->front < buffer->back)
+    {
+        return buffer->back - buffer->front;
+    }
+    // |x|x|o|o|o|x|x|x|
+    //      b     f
+    else if (buffer->front > buffer->back)
+    {
+        return OPERATIONS_N - (buffer->front - buffer->back);
+    }
+
+    return 0;
+}
+
+
+void operationsCbTests_push_pop()
+{
+    OperationParamsCb queue;
+
+    for (int i = 0; i < OPERATIONS_N; i++)
+    {
+        OperationParams* item = operations_cb_nextFree(&queue);
+        assert(item);
+        assert(item->objIndex == 0);
+        item->objIndex = i;
+    }
+
+    for (int i = OPERATIONS_N - 1;  i >= 0; i-- )
+    {
+        OperationParams* item = operations_cb_front(&queue);
+        assert(item);
+        operations_cb_pop(&queue);
+    }
+}
+
+void operationsCbTests()
+{
+    operationsCbTests_push_pop();
 }
