@@ -77,11 +77,14 @@ typedef struct
     pa_subscription_event_type_t eventType;
 } OperationParams;
 
+// TODO: Replace with your impl
+//https://embeddedartistry.com/blog/2017/05/17/creating-a-circular-buffer-in-c-and-c/
 typedef struct 
 {
     uint32_t front;
     uint32_t back;
-    OperationParams data[OPERATIONS_N];
+    uint32_t full;
+    OperationParams data[OPERATIONS_N]; // +1 slot for full detection.
 } OperationParamsCb;
 
 typedef struct {
@@ -94,20 +97,28 @@ typedef struct {
 
     OperationParams params;
     OperationParamsCb operations;
+    // pthread_mutex_t operationsMutex;
     ItcStruct* itc;
 } OperationState;
 
-
+//
+//  TODO: Later
+//
+void operations_cb_init(OperationParamsCb* buffer);
 // Allocates new element on the queue, and returns pointer to it.
 // Null if queue is full.
 OperationParams* operations_cb_nextFree(OperationParamsCb* buffer);
 // Removes element from front.
-void operations_cb_pop(OperationParamsCb* buffer);
+// Returns 1 if element removed 0 if not.
+uint32_t operations_cb_pop(OperationParamsCb* buffer);
 // Returns pointer to oldest element.
 OperationParams* operations_cb_front(OperationParamsCb* buffer);
 // N element on the queue.
 uint32_t operations_cb_size(OperationParamsCb* buffer);
 void operationsCbTests();
+//
+//  TODO: Later
+//
 
 void printSinkInput(SinkInputInfo* info);
 void pa_state_cb(pa_context *c, void *userdata);
@@ -115,8 +126,10 @@ void pa_sinklist_cb(pa_context *c, const pa_sink_info *l, int eol, void *userdat
 void pa_sourcelist_cb(pa_context *c, const pa_source_info *l, int eol, void *userdata);
 
 void sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata);
-void UpdateObject(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType);
+void remove_sink_input(OperationState* operationState, uint32_t index);
 
+void QueueOperation(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType, pa_subscription_event_type_t eventType);
+void FetchOperation(OperationState* operationState);
 
 // W pierwszym kroku:
 // [X] 1. Pobierz aktualną głośność systemu
@@ -243,8 +256,8 @@ void OperationCompleted(ItcStruct* itc)
 }
 
 int main(int argc, char *argv[]) {
-    operationsCbTests();
-    return 0;
+    // operationsCbTests();
+    // return 0;
 
     int action = ACTION_INC1;
     if (argc > 1)
@@ -349,6 +362,13 @@ void sink_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
     if (i == NULL)
     {
         printf("Sink with that name is null, eol: %d\n", eol);
+        return;
+    }
+
+    // Hanlde only default sink for now.
+    // TODO: Handle default sink change.
+    if (os->defaultSinkName[0] && strcmp(i->name, os->defaultSinkName))
+    {
         return;
     }
 
@@ -484,13 +504,14 @@ void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t idx, v
     // PA_SUBSCRIPTION_EVENT_FACILITY_MASK  <- kind of object
     // PA_SUBSCRIPTION_EVENT_TYPE_MASK      <- what happened
     int objectType = t & PA_SUBSCRIPTION_EVENT_FACILITY_MASK;
-    int event      = t & PA_SUBSCRIPTION_EVENT_TYPE_MASK;
+    int eventType  = t & PA_SUBSCRIPTION_EVENT_TYPE_MASK;
     
-    printf("[subscribe] obj: %2x, event: %2x, id: %d\n", objectType, event, idx);
+    printf("[subscribe] obj: %2x, event: %2x, id: %d\n", objectType, eventType, idx);
     OperationState* operation = (OperationState *)userdata;
-    if (objectType == PA_SUBSCRIPTION_EVENT_SINK && event == PA_SUBSCRIPTION_EVENT_CHANGE)
+    if (   (objectType == PA_SUBSCRIPTION_EVENT_SINK && eventType == PA_SUBSCRIPTION_EVENT_CHANGE)
+        || (objectType == PA_SUBSCRIPTION_EVENT_SINK_INPUT))
     {
-        UpdateObject(operation, idx, objectType);
+        QueueOperation(operation, idx, objectType, eventType);
     }
     // if (operation->state == STATE_INITALIZED)
     // {
@@ -508,7 +529,7 @@ void context_success_cb(pa_context *c, int success, void *userdata)
 }
 
 
-void UpdateObject(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType)
+void QueueOperation(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType, pa_subscription_event_type_t eventType)
 {
     // TODO: To spróbuj zrobić
     // TODO: To spróbuj zrobić
@@ -520,30 +541,49 @@ void UpdateObject(OperationState* operationState, uint32_t id, pa_subscription_e
     // TODO: To spróbuj zrobić
     // TODO: To spróbuj zrobić
     // TODO: To spróbuj zrobić
-    if (sem_trywait(&(operationState->itc->actionConsumed)) == -1)
+    // if (sem_trywait(&(operationState->itc->actionConsumed)) == -1)
+    // {
+    //     printf("operation in progress. Skipping update\n");
+    //     return;
+    // }
+
+    OperationParams* params = operations_cb_nextFree(&operationState->operations);
+    if (params == NULL)
     {
-        printf("operation in progress. Skipping update\n");
+        printf("operation buffer full. Skipping update\n");
         return;
     }
 
-    if (operationState->state == STATE_INITIALIZED)
-    {
-        operationState->params.objIndex = id;
-        operationState->params.objType = objectType;
+    // if (operationState->state == STATE_INITIALIZED)
+    // {
+        params->objIndex = id;
+        params->objType = objectType;
+        params->eventType = eventType;
+        
+        FetchOperation(operationState);
 
-        pa_mainloop_wakeup(operationState->itc->mainloop);
-
-        operationState->itc->action = ACTION_UPDATE_OBJ;
+        // operationState->itc->action = ACTION_UPDATE_OBJ;
         
         // Signal the mainloop that action is ready to execute.
-        sem_post(&operationState->itc->actionReady);
-    }
-    else
-    {
-        printf("operation in progress. Skipping update1\n");
-    }
+        // sem_post(&operationState->itc->actionReady);
+    // }
+    // else
+    // {
+    //     printf("operation in progress. Skipping update1\n");
+    // }
 }
 
+void FetchOperation(OperationState* operationState)
+{
+    OperationParams* operation = operations_cb_front(&operationState->operations);
+    if (operation != NULL && operationState->state == STATE_INITIALIZED && operationState->itc->action == ACTION_INCORRECT)
+    {
+        operationState->itc->action = ACTION_UPDATE_OBJ;
+        pa_mainloop_wakeup(operationState->itc->mainloop);
+
+        // operations_cb_pop(&operationState->operations);
+    }
+}
 // void pa_source_info_cb(pa_context *c, const pa_source_info *i, int eol, void *userdata);
 
 
@@ -556,6 +596,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
     OperationState operationState = {0};
     operationState.state = STATE_INCORRECT;
     operationState.itc = itc;
+    operations_cb_init(&operationState.operations);
 
     // int state = STATE_INIT;
     int pa_ready = 0;
@@ -615,14 +656,14 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
 
         if ((operationState.state != STATE_INCORRECT) && action == ACTION_INCORRECT)
         {
-            printf("Waiting for action\n");
+            // printf("Waiting for action\n");
             action = WaitForAction(itc);
             if (action == ACTION_INCORRECT)
             {
-                printf("action incorrect\n");
+                // printf("action incorrect\n");
                 continue;
             }
-            printf("action aquired: %x\n", action);
+            // printf("action aquired: %x\n", action);
         }
         
         // printf("got state: %d\n", operationState.state);
@@ -709,17 +750,54 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                 }
                 else if (action == ACTION_UPDATE_OBJ)
                 {
-                    pa_context_get_sink_info_by_index(
-                        pa_ctx,
-                        operationState.params.objIndex,
-                        sink_info_cb,
-                        &operationState
-                    );
-                    operationState.state = STATE_UPDATING_OBJECTS;
+                    OperationParams* params = operations_cb_front(&operationState.operations);
+                    if (!params)
+                    {
+                        operationState.itc->action = ACTION_INCORRECT;
+                        break;
+                    }
+
+                    switch(params->objType)
+                    {
+                        case PA_SUBSCRIPTION_EVENT_SINK:
+                            if (    params->eventType == PA_SUBSCRIPTION_EVENT_NEW
+                                ||  params->eventType == PA_SUBSCRIPTION_EVENT_CHANGE)
+                            {
+                                pa_op = pa_context_get_sink_info_by_index(
+                                    pa_ctx,
+                                    params->objIndex,
+                                    sink_info_cb,
+                                    &operationState
+                                );
+                            }
+                            break;
+                        case PA_SUBSCRIPTION_EVENT_SINK_INPUT:
+                            if (    params->eventType == PA_SUBSCRIPTION_EVENT_NEW
+                                ||  params->eventType == PA_SUBSCRIPTION_EVENT_CHANGE)
+                            {
+                                pa_op = pa_context_get_sink_input_info(
+                                    pa_ctx,
+                                    params->objIndex,
+                                    sink_input_info_cb,
+                                    &operationState
+                                );
+                            }
+                            else
+                            {
+                                // Idk if callback would be called if object is destroyed.
+                                // (the one above)
+                                remove_sink_input(&operationState, params->objIndex);
+                            }
+                            break;
+                            default:
+                                itc->action = ACTION_INCORRECT;
+                    }
+                    operationState.state = itc->action != ACTION_INCORRECT ? STATE_UPDATING_OBJECTS : STATE_INITIALIZED;
                     break;
-                    // operationState->params.objIndex = id;
-                    // operationState->params.objType = objectType;
-                    // Update sink.
+                }
+                else if (action == ACTION_INCORRECT)
+                {
+                    FetchOperation(&operationState);
                 }
             break;
             case STATE_UPDATING_OBJECTS:
@@ -727,6 +805,10 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                     if (isOperation(&pa_op))
                     {
                         break;
+                    }
+                    if (action == ACTION_UPDATE_OBJ)
+                    {
+                        operations_cb_pop(&operationState.operations);
                     }
                     // pa_op = NULL;
                     
@@ -740,6 +822,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                     operationState.state = STATE_INITIALIZED;
                     action = ACTION_INCORRECT;
                     OperationCompleted(itc);
+                    FetchOperation(&operationState);
                 break;
             case STATE_SHUTTING_DOWN:
                 if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
@@ -779,10 +862,19 @@ void printSinkInput(SinkInputInfo* info)
             volumePercent
         );
     }
-    // else
-    // {
-    //     printf("")
-    // }
+}
+
+void remove_sink_input(OperationState* operationState, uint32_t index)
+{
+    SinkInputInfo* sinkInputList = operationState->sinkInputs;
+    
+    for (int i = 0; i < SINK_INPUTS_N; i++) {
+        if (sinkInputList[i].initialized && sinkInputList[i].index == index)
+        {
+            sinkInputList[i].initialized = 0;
+            printf("[SinkInput] removed: %3d\n", index);
+        }
+    }
 }
 
 void sink_input_info_cb(pa_context *c, const pa_sink_input_info *info, int eol, void *userdata)
@@ -790,17 +882,42 @@ void sink_input_info_cb(pa_context *c, const pa_sink_input_info *info, int eol, 
     // SinkInputInfo *sinkInputInfoList = userdata;
     OperationState* operationState = userdata;
     SinkInputInfo* sinkInputList = operationState->sinkInputs;
-
+    
     if (eol > 0) {
         return;
+    }
+
+    if (eol < 0)
+    {
+        // eol < 0 == some error happened
+        // probably sink input was removed somewhere between 
+        // requesting information about it.
+        printf("[sink input info cb] eol < 0\n");
+        return;
+    }
+
+    OperationParams* params = operations_cb_front(&operationState->operations);
+    if (operationState->state == STATE_UPDATING_OBJECTS && params == NULL)
+    {
+        // When not initialized. It might just listing them.
+        printf("[SinkInput cb] No operation, idk what to do. id: %d\n", info->index);
+        return;
+    }
+
+    // TODO: ehhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh
+    OperationParams tempParams = {0};
+    if (params == NULL)
+    {
+        params = &tempParams;
+        params->eventType = PA_SUBSCRIPTION_EVENT_NEW;
     }
     
     SinkInputInfo* sink = NULL;
     for (int i = 0; i < SINK_INPUTS_N; i++) {
         if (
-            (operationState->params.eventType == PA_SUBSCRIPTION_EVENT_NEW && !sinkInputList[i].initialized)
-            || (((operationState->params.eventType == PA_SUBSCRIPTION_EVENT_CHANGE) 
-                 || (operationState->params.eventType == PA_SUBSCRIPTION_EVENT_REMOVE)) 
+            (params->eventType == PA_SUBSCRIPTION_EVENT_NEW && !sinkInputList[i].initialized)
+            || (((params->eventType == PA_SUBSCRIPTION_EVENT_CHANGE) 
+                 || (params->eventType == PA_SUBSCRIPTION_EVENT_REMOVE)) 
                  && sinkInputList[i].initialized)
             )
         {
@@ -810,7 +927,7 @@ void sink_input_info_cb(pa_context *c, const pa_sink_input_info *info, int eol, 
 
     if (sink)
     {
-        if (operationState->params.eventType == PA_SUBSCRIPTION_EVENT_REMOVE)
+        if (params->eventType == PA_SUBSCRIPTION_EVENT_REMOVE)
         {
             sink->initialized = 0;
             printf("[SinkInput] removed: %3d\n", sink->index);
@@ -917,68 +1034,209 @@ void pa_sourcelist_cb(pa_context *c, const pa_source_info *l, int eol, void *use
 }
 
 
+uint32_t operations_cb_empty(OperationParamsCb* buffer)
+{
+    return !buffer->full && (buffer->front == buffer->back);
+}
+
+
+uint32_t operations_cb_full(OperationParamsCb* buffer)
+{
+    return buffer->full;
+}
+
+void operations_cb_advance(OperationParamsCb* buffer)
+{
+    if (buffer->full)
+    {
+        buffer->front = (buffer->front + 1) % OPERATIONS_N;    
+    }
+
+    buffer->back = (buffer->back + 1) % OPERATIONS_N;
+    buffer->full = (buffer->front == buffer->back);
+}
+
+void operations_cb_retreat(OperationParamsCb* buffer)
+{
+    buffer->full = 0;
+    buffer->front = (buffer->front + 1) % OPERATIONS_N;
+}
+
+void operations_cb_init(OperationParamsCb* buffer)
+{
+    assert(buffer);
+
+    buffer->front = 0;
+    buffer->back = 0;
+    buffer->full = 0;
+}
 
 OperationParams* operations_cb_nextFree(OperationParamsCb* buffer)
 {
-    if (operations_cb_size(buffer) < OPERATIONS_N)
+    if (!operations_cb_full(buffer))
     {
         OperationParams* freeElem = &buffer->data[buffer->back];
-        buffer->back = (buffer->back + 1) % OPERATIONS_N;
+        freeElem->taken = 1;
+        operations_cb_advance(buffer);
         return freeElem;
     }
 
     return NULL;
 }
 
-void operations_cb_pop(OperationParamsCb* buffer)
+uint32_t operations_cb_pop(OperationParamsCb* buffer)
 {
+    if (!operations_cb_empty(buffer))
+    {
+        buffer->data[buffer->front].taken = 0;
+        operations_cb_retreat(buffer);
+        return 1;
+    }
+
+    return 0;
 }
 
 OperationParams* operations_cb_front(OperationParamsCb* buffer)
 {
-    return NULL;
+    OperationParams* item =  &buffer->data[buffer->front];
+    return !operations_cb_empty(buffer) ? item : NULL;
 }
 
 uint32_t operations_cb_size(OperationParamsCb* buffer)
 {
-    // |o|o|x|x|x|o|o|o|
-    //      f     b
-    if (buffer->front < buffer->back)
+    uint32_t size = OPERATIONS_N;
+    if (!buffer->full)
     {
-        return buffer->back - buffer->front;
-    }
-    // |x|x|o|o|o|x|x|x|
-    //      b     f
-    else if (buffer->front > buffer->back)
-    {
-        return OPERATIONS_N - (buffer->front - buffer->back);
+        if (buffer->back >= buffer->front)
+        {
+            size = buffer->back - buffer->front;
+        }
+        else
+        {
+            size = OPERATIONS_N + buffer->back - buffer->front;
+        }
     }
 
-    return 0;
+    return size;
 }
 
 
 void operationsCbTests_push_pop()
 {
     OperationParamsCb queue;
+    operations_cb_init(&queue);
 
     for (int i = 0; i < OPERATIONS_N; i++)
     {
         OperationParams* item = operations_cb_nextFree(&queue);
         assert(item);
-        assert(item->objIndex == 0);
+        assert(item->taken);
         item->objIndex = i;
+        printf("Pushing: %d, \n", i);
     }
 
     for (int i = OPERATIONS_N - 1;  i >= 0; i-- )
     {
         OperationParams* item = operations_cb_front(&queue);
         assert(item);
+        assert(item->taken);
+        assert(operations_cb_pop(&queue));
+        printf("removed: %d\n", i);
+    }
+}
+
+void operationsCbTests_push_full()
+{
+    OperationParamsCb queue;
+    operations_cb_init(&queue);
+
+    for (int i = 0; i < OPERATIONS_N; i++)
+    {
+        OperationParams* item = operations_cb_nextFree(&queue);
+        assert(item);
+        assert(item->taken);
+        item->objIndex = i;
+    }
+
+    OperationParams* item = operations_cb_nextFree(&queue);
+    assert(!item);
+    assert(operations_cb_size(&queue) == OPERATIONS_N);
+}
+
+
+void operationsCbTests_pop_empty()
+{
+    OperationParamsCb queue;
+    operations_cb_init(&queue);
+
+    OperationParams* item = operations_cb_front(&queue);
+    assert(!item);
+    assert(operations_cb_size(&queue) == 0);
+    assert(operations_cb_pop(&queue) == 0);
+}
+
+void operationsCbTests_back_lt_front_size()
+{
+    OperationParamsCb queue;
+    operations_cb_init(&queue);
+
+    for (int i = 0; i < OPERATIONS_N; i++)
+    {
+        OperationParams* item = operations_cb_nextFree(&queue);
+        assert(item);
+        assert(item->taken);
+        item->objIndex = i;
+    }
+
+    for (int i = 0; i < (OPERATIONS_N) / 4 * 3; i++)
+    {
         operations_cb_pop(&queue);
     }
+
+
+    for (int i = 0; i < (OPERATIONS_N) / 4; i++)
+    {
+        OperationParams* item = operations_cb_nextFree(&queue);
+        assert(item);
+        assert(item->taken);
+    }
+    printf("size: %d\n", operations_cb_size(&queue));
+    assert(operations_cb_size(&queue) == (OPERATIONS_N) / 2);
+}
+void operationsCbTests_back_lt_front_size2()
+{
+    OperationParamsCb queue;
+    operations_cb_init(&queue);
+
+    for (int i = 0; i < OPERATIONS_N; i++)
+    {
+        OperationParams* item = operations_cb_nextFree(&queue);
+        assert(item);
+        assert(item->taken);
+        item->objIndex = i;
+    }
+
+    for (int i = 0; i < (OPERATIONS_N) -1; i++)
+    {
+        operations_cb_pop(&queue);
+    }
+
+
+    for (int i = 0; i < (OPERATIONS_N) -2; i++)
+    {
+        OperationParams* item = operations_cb_nextFree(&queue);
+        assert(item);
+        assert(item->taken);
+    }
+    printf("size: %d\n", operations_cb_size(&queue));
+    assert(operations_cb_size(&queue) == (OPERATIONS_N - 1));
 }
 
 void operationsCbTests()
 {
     operationsCbTests_push_pop();
-}
+    operationsCbTests_push_full();
+    operationsCbTests_pop_empty();
+    operationsCbTests_back_lt_front_size2();
+    operationsCbTests_back_lt_front_size();
+};
