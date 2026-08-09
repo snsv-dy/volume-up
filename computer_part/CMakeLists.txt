@@ -50,4 +50,15 @@ target_include_directories(gui PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master # for imgui
 )
 
+add_executable(usb_protocol_basic usb_protocol_basic.c)
+
+target_include_directories(usb_protocol_basic PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}
+)
+
+# find_package(libusb-1.0.0 REQUIRED)
+target_link_libraries(usb_protocol_basic PRIVATE
+    usb-1.0
+)
+
 #   cmake [options] -S <path-to-source> -B <path-to-build>
