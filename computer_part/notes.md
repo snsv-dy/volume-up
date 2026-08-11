@@ -1,4 +1,4 @@
-# TODO: Add os/ to git.
+# TODO: Add os/ to git. I zmień nazwę na tp
 
 # Circular buffer:
 https://embeddedartistry.com/blog/2017/05/17/creating-a-circular-buffer-in-c-and-c/
@@ -24,9 +24,20 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
 * https://docs.kernel.org/driver-api/usb/writing_usb_driver.html
 * https://docs.kernel.org/userspace-api/gpio/sysfs.html (sysfs gpio [obsolete don't use outside of interview take home tasks])
 * http://www.linux-usb.org/gadget/ (Will this be able to mock a device?)
+* https://www.kernel.org/doc/html/v4.19/driver-api/usb/gadget.html
+* https://github.com/xairy/raw-gadget
+* https://docs.kernel.org/usb/gadget_configfs.html
 
 ## Plan:
 1. libUsb na komputerze & tinyUsb na urządzeniu
+    b. pierw spróbować obsłużyć np klawiaturę przez libusb??
+        1. Znajdź pico przez libusb
+        2. otwórz
+        3. Prześlij/odbierz dane.
+        ----
+        1. To samo z gadgetem, może przez ten interfejs configfs (https://docs.kernel.org/usb/gadget_configfs.html)
+    a. jak zamockować urządzenie usb do testowania?
+    c. co to jest udev, modprobe, ioctl
 2. profit (Sterownik usb dla linuxa)
 3. własna implementacja usb na urządzeniu???
-4. 2 konfiguracje (dla sterownika i klawiatura hid [dla play/pause, mute i jeśli nie połączy się ze sterownikiem])
+4. 2 konfiguracje (dla sterownika i klawiatura hid [dla play/pause, mute i jeśli nie połączy się ze sterownikiem])ŚP przetwórstwa rolnego w Polsce, zostały one zainwestowane w 100%. Zdecydowana większość wsparcia ze środków europejskich idzie na pol
