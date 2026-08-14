@@ -24,16 +24,67 @@ libusb_free_device_list() to free the allocated device list memory.
 typedef struct
 {
     uint8_t eventThreadRun;
+    pthread_mutex_t mutexEventThreadRun;
+
     pthread_t libusbThread;
     struct libusb_device_handle* deviceHandle;
     unsigned char keyboardEndpointAddress;
 
+    // uint8_t transferSubmitted;
+    struct libusb_transfer *transfer;
+    uint8_t cancelCompleted;
     char interruptData[DATA_LEN];
 } ProgramState;
+
+void* libusbMainLoop(void* arg);
+void initLibusbThread(ProgramState* programState)
+{
+    pthread_mutex_init(&programState->mutexEventThreadRun, NULL);
+
+    programState->eventThreadRun = 1;
+    if (pthread_create(&programState->libusbThread, NULL, libusbMainLoop, (void*)programState) != 0)
+    {
+        printf("Failed to create input thread\n");
+    }
+}
+
+void cleanLibusbThread(ProgramState* programState)
+{
+    pthread_join(programState->libusbThread, NULL);
+    pthread_mutex_destroy(&programState->mutexEventThreadRun);
+}
+
+void setEventThreadRun(ProgramState* programState, const uint8_t value)
+{
+    printf("[setEventThreadRun] entering mutex\n");
+    pthread_mutex_lock(&programState->mutexEventThreadRun);
+    printf("[setEventThreadRun] mutex enter\n");
+    
+    programState->eventThreadRun = value;
+    printf("[setEventThreadRun] programState->eventThreadRun = value; done\n");
+
+    pthread_mutex_unlock(&programState->mutexEventThreadRun);
+    printf("[setEventThreadRun] mutex exit\n");
+}
+
+void closeDeviceAndStop(ProgramState* programState)
+{
+    printf("[closeDeviceAndStop] entering mutex\n");
+    pthread_mutex_lock(&programState->mutexEventThreadRun);
+    printf("[closeDeviceAndStop] mutex enter\n");
+
+    libusb_close(programState->deviceHandle);
+    programState->eventThreadRun = 0;
+    printf("[closeDeviceAndStop] libusb_close done\n");
+
+    pthread_mutex_unlock(&programState->mutexEventThreadRun);
+    printf("[closeDeviceAndStop] mutex exit\n");
+}
 
 void keyboardInterrupt(struct libusb_transfer *transfer)
 {
     ProgramState* programState = (ProgramState*)transfer->user_data;
+    // programState->transferSubmitted = 0; // No mutex to be as fast as fuck.
 
     printf("Interrup callback\n"
             "Status: (0x%x) ", transfer->status);
@@ -64,10 +115,13 @@ void keyboardInterrupt(struct libusb_transfer *transfer)
             printf(")\n");
         }
 
-        if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE || transfer->status == LIBUSB_TRANSFER_ERROR)
+        if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE 
+            || transfer->status == LIBUSB_TRANSFER_ERROR
+            || transfer->status == LIBUSB_TRANSFER_CANCELLED)
         {
-            libusb_close(transfer->user_data);
-            programState->eventThreadRun = 0;
+            programState->cancelCompleted = 1;
+            // We can't close handle here since it will stop the libusb loop immediately.
+            // closeDeviceAndStop(programState);
             return;
         }
 
@@ -76,8 +130,8 @@ void keyboardInterrupt(struct libusb_transfer *transfer)
         if (err)
         {
             errx(err, "libusb_submit_transfer error: %s\n", libusb_error_name(err));
-            programState->eventThreadRun = 0;
-            libusb_close(transfer->user_data);
+            // We can't close handle here since it will stop the libusb loop immediately.
+            // closeDeviceAndStop(programState);
         }
 
         // printf("Next transfer submitted\n");
@@ -217,48 +271,64 @@ int main() {
         */
           
 
-        struct libusb_transfer* transfer = libusb_alloc_transfer(0);
-        libusb_fill_interrupt_transfer(transfer, handle, programState.keyboardEndpointAddress, programState.interruptData, DATA_LEN, keyboardInterrupt, &programState, 500);
-        err = libusb_submit_transfer(transfer);
+        programState.transfer = libusb_alloc_transfer(0);
+        libusb_fill_interrupt_transfer(programState.transfer, handle, programState.keyboardEndpointAddress, programState.interruptData, DATA_LEN, keyboardInterrupt, &programState, 500);
+        err = libusb_submit_transfer(programState.transfer);
         if (err)
         {
             errx(err, "auto detach error: %s\n", libusb_error_name(err));
         }
+        // programState.transferSubmitted = 1;
 
         //
         // Communication with the device.
         //
-        programState.eventThreadRun = 1;
-        if (pthread_create(&programState.libusbThread, NULL, libusbMainLoop, (void*)&programState) != 0)
-        {
-            printf("Failed to create input thread\n");
-        }
+        initLibusbThread(&programState);
 
         printf("Any key to close application\n");
         char theGuy = getchar();
         printf ("[Char read] '%c'\n", theGuy);
+
+        libusb_cancel_transfer(programState.transfer);
+        
+        while (!programState.cancelCompleted)
+        {
+            // Timeout for cancellation to execute.
+            usleep(1000 * 100);
+        }
+        // If still not shut down after 100ms do it here. 
+        // (the other thread had whole 100ms to do its job and still failed, lazy ass mf, smh)
+        // printf("[main] entering mutex\n");
+        pthread_mutex_lock(&programState.mutexEventThreadRun);
+        // printf("[main] mutex enter\n");
         if (programState.eventThreadRun)
         {
             programState.eventThreadRun = 0;
+            // Wake up the libusb thread.
+
+            printf("libusb_release_interface\n");
+            // Release interface before closing the handle.
+            err = libusb_release_interface(handle, KEYBOARD_INTERFACE);
+            if (err)
+            {
+                errx(err, "auto detach error: %s\n", libusb_error_name(err));
+            }
             libusb_close(programState.deviceHandle);
         }
+        pthread_mutex_unlock(&programState.mutexEventThreadRun);
+        // printf("[main] mutex exit\n");
 
-        pthread_join(programState.libusbThread, NULL);
-        
-
-        // Tu pętla była
-
+        // Wait for thread to join.
+        cleanLibusbThread(&programState);
+        // printf("[main] cleanLibusbThread exit\n");
         //
-        // Cleaning up.
+        // Cleaning up. libusb
         //
 
-        libusb_free_transfer(transfer);
+        printf("libusb_free_transfer\n");
+        libusb_free_transfer(programState.transfer);
 
-        err = libusb_release_interface(handle, 0);
-        if (err)
-        {
-            errx(err, "auto detach error: %s\n", libusb_error_name(err));
-        }
+        printf("libusb_free_config_descriptor\n");
         libusb_free_config_descriptor(activeConfig);
 
         // close in callback.
@@ -269,7 +339,9 @@ int main() {
         printf("Nie otwieramy?\n");
     }
 
+    printf("libusb_free_device_list\n");
     libusb_free_device_list(devices, 1);
 
+    printf("libusb_exit\n");
     libusb_exit(NULL);
 }
