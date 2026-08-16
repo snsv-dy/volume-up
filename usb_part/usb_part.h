@@ -6,6 +6,8 @@
 #define INTERRUPT_EP_SIZE 8
 #define INTERRUPT_EP_INTERVAL 20 // ms (allowed: 1 - 255)
 
+
+
 void usbInit();
 void usbLoop();
 

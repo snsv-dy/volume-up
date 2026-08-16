@@ -94,10 +94,19 @@
 #define CFG_TUD_MSC               0
 #define CFG_TUD_MIDI              0
 #define CFG_TUD_VENDOR            1
-#define CFG_TUD_VENDOR_EP_BUFSIZE  8
-#define CFG_TUD_VENDOR_RX_BUFSIZE  64 // or 64
-#define CFG_TUD_VENDOR_TX_BUFSIZE  64 // or 64
-#define CFG_TUD_VENDOR_EPSIZE 8
+
+#define CFG_TUD_VENDOR_RX_BUFSIZE     0
+#define CFG_TUD_VENDOR_TX_BUFSIZE     0
+#define CFG_TUD_VENDOR_EP_INT_OUT          1
+#define CFG_TUD_VENDOR_EP_INT_IN           1
+// #define CFG_TUD_VENDOR_EP_INT_OUT_BUFSIZE  (TUD_OPT_HIGH_SPEED ? 512 : 64)
+// #define CFG_TUD_VENDOR_EP_INT_IN_BUFSIZE   (TUD_OPT_HIGH_SPEED ? 512 : 64)
+#define CFG_TUD_VENDOR_EP_INT_OUT_BUFSIZE  (64)
+#define CFG_TUD_VENDOR_EP_INT_IN_BUFSIZE   (64)
+// #define CFG_TUD_VENDOR_EP_BUFSIZE  8
+// #define CFG_TUD_VENDOR_RX_BUFSIZE  64 // or 64
+// #define CFG_TUD_VENDOR_TX_BUFSIZE  64 // or 64
+// #define CFG_TUD_VENDOR_EPSIZE 8
 // HID buffer size Should be sufficient to hold ID (if any) + Data
 // #define CFG_TUD_HID_EP_BUFSIZE    8
 

@@ -6,6 +6,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+add_subdirectory(tinyusb/src)
 # Initialise pico_sdk from installed location
 # (note this can come from environment, CMake cache etc)
 
@@ -30,6 +31,8 @@ include(pico_sdk_import.cmake)
 
 project(volume-up C CXX ASM)
 
+set(PICO_TINYUSB_PATH ${CMAKE_CURRENT_LIST_DIR}/tinyusb/)
+
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
@@ -42,6 +45,7 @@ add_executable(volume-up
     bsp.c
     impulsator.c
 )
+# tinyusb_target_add(volume-up)
 
 pico_set_program_name(volume-up "volume-up")
 pico_set_program_version(volume-up "0.1")

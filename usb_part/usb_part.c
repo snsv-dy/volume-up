@@ -3,6 +3,7 @@
 #include "bsp.h"
 #include "tusb.h"
 #include "pico/stdlib.h"
+#include "usb_format.h"
 
 //https://github.com/hathach/tinyusb/blob/master/examples/device/hid_multiple_interface/src/usb_descriptors.c
 
@@ -106,13 +107,13 @@ void tud_resume_cb(void)
 }
 
 static bool writeRequested = 0;
-void tud_vendor_tx_cb(uint8_t itf, uint32_t sent_bytes) {
+// void tud_ven
+TU_ATTR_WEAK void tud_vendor_int_tx_cb(uint8_t itf, uint32_t sent_bytes) {
     // INFO("Sent 0x%02x bytes", sent_bytes);
     printf("tud_vendor_tx_cb: %d\n", sent_bytes);
     writeRequested = 0;
 }
-
-void tud_vendor_rx_cb(uint8_t itf, uint8_t const* buffer, uint16_t bufsize) {
+TU_ATTR_WEAK void tud_vendor_int_rx_cb(uint8_t itf, const uint8_t *buffer, uint32_t bufsize) {
     if (bufsize == 0)
     {
         printf("tud_vendor_rx_cb: bufsize == 0\n");
@@ -235,13 +236,16 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
 //     // }
 // }
 
+// Different numbers than the audio.c host application.
+// To fit in one byte.
+
 static uint8_t writeBuffer[INTERRUPT_EP_SIZE] = {0};
 void vendor_task()
 {
-    const uint32_t interval_ms = 500;
+    const uint32_t interval_ms = 10;
     static uint32_t start_ms = 0;
 
-    if (board_millis() - start_ms < interval_ms) return;
+    if (tusb_time_millis_api() - start_ms < interval_ms) return;
     start_ms += interval_ms;
 
     if (writeRequested)
@@ -249,12 +253,26 @@ void vendor_task()
         return;
     }
 
-    writeBuffer[0] = 'J';
-    writeBuffer[1] = 'A';
-    if (tud_vendor_n_write_available(0))
+    if (tud_vendor_n_int_write_available(0))
     {
-        tud_vendor_n_write(0, writeBuffer, INTERRUPT_EP_SIZE);
-        tud_vendor_write_flush();
+
+        bool volUp = isVolumeUp();
+        bool volDown = isVolumeDown();
+        if (volUp)
+        {
+            writeBuffer[0] = ACTION_INC5;
+        }
+        else if (volDown)
+        {
+            writeBuffer[0] = ACTION_DEC5;
+        }
+        else
+        {
+            return;
+        }
+
+        tud_vendor_n_int_write(0, writeBuffer, INTERRUPT_EP_SIZE);
+        // tud_vendor_write_flush();
         writeRequested = 1;
         printf("Packet sent\n");
     }
@@ -271,7 +289,7 @@ void led_blinking_task()
 
     if (!blink_interval_ms) return;
 
-    if (board_millis() - start_ms < blink_interval_ms) return;
+    if (tusb_time_millis_api() - start_ms < blink_interval_ms) return;
     start_ms += blink_interval_ms;
 
     gpio_put(USB_STATUS_LED, led_state);

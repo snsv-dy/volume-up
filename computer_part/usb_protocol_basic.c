@@ -9,6 +9,7 @@
 #include <unistd.h>
 // #include <libusb.h>
 #include <err.h>
+#include "usb_format.h"
 
 #define MFGR_ID 0 // given manufacturer ID 
 #define DEV_ID 0  // given device ID
@@ -18,7 +19,7 @@ list of all USB devices connected to the machine. Follow this call with
 libusb_free_device_list() to free the allocated device list memory.
 */
 #define DATA_LEN 8
-#define INTERRUPT_TIMEOUT_MS 500
+#define INTERRUPT_TIMEOUT_MS 2000
 #define KEYBOARD_INTERFACE 0
 
 typedef struct
@@ -113,6 +114,14 @@ void keyboardInterrupt(struct libusb_transfer *transfer)
                 printf("0x%x, ", transfer->buffer[i]);
             }
             printf(")\n");
+
+            const uint8_t action = transfer->buffer[0];
+            switch(action)
+            {
+                case ACTION_INC5: printf("Received +5%% action\n"); break;
+                case ACTION_DEC5: printf("Received -5%% action\n"); break;
+                default: printf("default action\n");
+            }
         }
 
         if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE 
@@ -231,8 +240,8 @@ int main() {
                 printf("bSynchAddress: 0x%x\n", endpoint->bSynchAddress);
                 printf("--------------\n");
 
-                if (i == 0 && endpoint->bEndpointAddress == 0x81) // The in endpoint.
-                // if (i == 0 && (endpoint->bEndpointAddress & 0b10000000)) // The in endpoint.
+                // if (i == 0 && endpoint->bEndpointAddress == 0x81) // The in endpoint.
+                if (i == 0 && (endpoint->bEndpointAddress & 0x80)) // The in endpoint.
                 // if (i == 0 && (endpoint->bEndpointAddress == 0x2)) // The in endpoint.
                 {
                     printf("Endpoint set! 0x%x\n", endpoint->bEndpointAddress);
@@ -277,7 +286,16 @@ int main() {
           
 
         programState.transfer = libusb_alloc_transfer(0);
-        libusb_fill_interrupt_transfer(programState.transfer, handle, programState.keyboardEndpointAddress, programState.interruptData, DATA_LEN, keyboardInterrupt, &programState, 500);
+        libusb_fill_interrupt_transfer(
+            programState.transfer, 
+            handle, 
+            programState.keyboardEndpointAddress, 
+            programState.interruptData, 
+            DATA_LEN, 
+            keyboardInterrupt, 
+            &programState, 
+            INTERRUPT_TIMEOUT_MS);
+
         err = libusb_submit_transfer(programState.transfer);
         if (err)
         {

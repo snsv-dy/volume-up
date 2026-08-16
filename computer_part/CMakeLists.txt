@@ -44,16 +44,21 @@ target_link_libraries(gui PRIVATE
     dl
 )
 
+# get_filename_component(PARENT_DIR ../ ABSOLUTE)
 target_include_directories(gui PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/os/include
         ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master # for imgui
+        
+        # /home/jacek/programy/pico1/volume-up/usb_part/usb_format.h
 )
+# message(WARNING ${PARENT_DIR})
 
 add_executable(usb_protocol_basic usb_protocol_basic.c)
 
 target_include_directories(usb_protocol_basic PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/../usb_part
 )
 
 # find_package(libusb-1.0.0 REQUIRED)
