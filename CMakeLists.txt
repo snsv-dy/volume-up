@@ -37,7 +37,8 @@ pico_sdk_init()
 
 add_executable(volume-up 
     volume-up.c
-    usb_part.c
+    usb_part/usb_part.c
+    usb_part/descriptors.c
     bsp.c
     impulsator.c
 )
@@ -62,6 +63,7 @@ target_link_libraries(volume-up
 # Add the standard include files to the build
 target_include_directories(volume-up PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/usb_part
 )
 
 # Add any user requested libraries

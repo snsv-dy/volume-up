@@ -219,7 +219,7 @@ int main() {
             printf("--------------\n");
             for (int j = 0; j < interfaceDescriptor->bNumEndpoints; j++)
             {
-                const struct libusb_endpoint_descriptor *endpoint = (const struct libusb_endpoint_descriptor *)interfaceDescriptor->endpoint;
+                const struct libusb_endpoint_descriptor *endpoint = (const struct libusb_endpoint_descriptor *)&interfaceDescriptor->endpoint[j];
                 printf("Endpoint %d\n", j);
                 printf("bLength: 0x%x\n", endpoint->bLength);
                 printf("bDescriptorType: 0x%x\n", endpoint->bDescriptorType);
@@ -231,9 +231,13 @@ int main() {
                 printf("bSynchAddress: 0x%x\n", endpoint->bSynchAddress);
                 printf("--------------\n");
 
-                if (i == 0 && j == 0)
+                if (i == 0 && endpoint->bEndpointAddress == 0x81) // The in endpoint.
+                // if (i == 0 && (endpoint->bEndpointAddress & 0b10000000)) // The in endpoint.
+                // if (i == 0 && (endpoint->bEndpointAddress == 0x2)) // The in endpoint.
                 {
+                    printf("Endpoint set! 0x%x\n", endpoint->bEndpointAddress);
                     programState.keyboardEndpointAddress = endpoint->bEndpointAddress;
+                    // programState.keyboardEndpointAddress = endpoint->bEndpointAddress;
                 }
             }
             printf("==============\n");
@@ -266,6 +270,7 @@ int main() {
         [1/2x] 3. czekanie na zakończenie przez użytkownika w mainie (wraz z zamknięciem struktur libusba)
                3.1 Nie zamyka się poprawnie jeszcze.
                4. Własny endpoint/interface do odbierania
+               \/ -- To zrób, żeby sprawdzić czy urządzenie cokolwiek odbiera.
                5. I wysyłania danych? (np. aktualna głośność systemowa)
 
         */

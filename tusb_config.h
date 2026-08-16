@@ -55,7 +55,7 @@
 #endif
 
 #ifndef CFG_TUSB_DEBUG
-#define CFG_TUSB_DEBUG        0
+#define CFG_TUSB_DEBUG        5
 #endif
 
 // Enable Device stack
@@ -87,14 +87,18 @@
 #define CFG_TUD_ENDPOINT0_SIZE    64
 #endif
 
+
 //------------- CLASS -------------//
-#define CFG_TUD_HID               2
+#define CFG_TUD_HID               0
 #define CFG_TUD_CDC               0
 #define CFG_TUD_MSC               0
 #define CFG_TUD_MIDI              0
-#define CFG_TUD_VENDOR            0
-
+#define CFG_TUD_VENDOR            1
+#define CFG_TUD_VENDOR_EP_BUFSIZE  8
+#define CFG_TUD_VENDOR_RX_BUFSIZE  64 // or 64
+#define CFG_TUD_VENDOR_TX_BUFSIZE  64 // or 64
+#define CFG_TUD_VENDOR_EPSIZE 8
 // HID buffer size Should be sufficient to hold ID (if any) + Data
-#define CFG_TUD_HID_EP_BUFSIZE    8
+// #define CFG_TUD_HID_EP_BUFSIZE    8
 
 #endif

@@ -28,6 +28,9 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
 * https://github.com/xairy/raw-gadget
 * https://docs.kernel.org/usb/gadget_configfs.html
 * https://www.reactivated.net/writing_udev_rules.html
+* https://github.com/piersfinlayson/tinyusb-vendor-example
+* sudo cat /sys/kernel/debug/usb/devices
+* lsusb -s 001:006 -v
 
 ## Plan:
 1. libUsb na komputerze & tinyUsb na urządzeniu

@@ -2,7 +2,7 @@
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 
-#include "usb_part.h"
+#include "usb_part/usb_part.h"
 #include "bsp.h"
 
 // #define DEBOUNCE_DELAY_MS 
@@ -56,6 +56,7 @@ int main()
 
     bspInit();
 
+    printf("Yay!\n");
     while (true) {
         // static int count = 0;
         // printf("Hello, world! %d\n", count++);
