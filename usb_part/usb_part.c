@@ -71,7 +71,7 @@ void usbInit()
         .speed = TUSB_SPEED_AUTO
     };
     tusb_init(BOARD_TUD_RHPORT, &dev_init);
-
+    
     board_init_after_tusb();
 }
 
@@ -108,25 +108,40 @@ void tud_resume_cb(void)
 
 static bool writeRequested = 0;
 // void tud_ven
-TU_ATTR_WEAK void tud_vendor_int_tx_cb(uint8_t itf, uint32_t sent_bytes) {
+void tud_vendor_int_tx_cb(uint8_t itf, uint32_t sent_bytes) {
     // INFO("Sent 0x%02x bytes", sent_bytes);
     printf("tud_vendor_tx_cb: %d\n", sent_bytes);
     writeRequested = 0;
+
 }
-TU_ATTR_WEAK void tud_vendor_int_rx_cb(uint8_t itf, const uint8_t *buffer, uint32_t bufsize) {
+void tud_vendor_int_rx_cb(uint8_t itf, const uint8_t *buffer, uint32_t bufsize) 
+{
+    printf("tud_vendor_int_rx_cb\n");
+
     if (bufsize == 0)
     {
         printf("tud_vendor_rx_cb: bufsize == 0\n");
-        return;
     }
-
-    if (!buffer)
+    else if (!buffer)
     {
         printf("tud_vendor_rx_cb: buffer == null\n");
-        return;
+    }
+    else
+    {
+        printf("tud_vendor_rx_cb: itf: %d: ", itf);
+            for (int i = 0; i < bufsize; i++)
+            {
+                printf("%c", buffer[i]);
+            }
+            printf(" (");
+            for (int i = 0; i < bufsize; i++)
+            {
+                printf("0x%x, ", buffer[i]);
+            }
+            printf(")\n");
     }
 
-    printf("tud_vendor_rx_cb: buffer[0]: %d, itf: %d\n", buffer[0], itf);
+    tud_vendor_n_int_read_xfer(itf);
 }
 
 bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const* request) {
@@ -247,6 +262,22 @@ void vendor_task()
 
     if (tusb_time_millis_api() - start_ms < interval_ms) return;
     start_ms += interval_ms;
+
+    if (!tud_vendor_mounted())
+    {
+        return;
+    }
+
+    static int nPrinted = 0;
+    bool result = tud_vendor_n_int_read_xfer(0);
+    if (!result && nPrinted++ < 5)
+    {
+        printf("!tud_vendor_n_int_read_xfer(0);\n");
+    }
+    else if (result)
+    {
+        nPrinted = 0;
+    }
 
     if (writeRequested)
     {

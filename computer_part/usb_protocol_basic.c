@@ -9,7 +9,8 @@
 #include <unistd.h>
 // #include <libusb.h>
 #include <err.h>
-#include "usb_format.h"
+#include <usb_format.h>
+#include <device_interface.h>
 
 #define MFGR_ID 0 // given manufacturer ID 
 #define DEV_ID 0  // given device ID
@@ -29,13 +30,21 @@ typedef struct
 
     pthread_t libusbThread;
     struct libusb_device_handle* deviceHandle;
-    unsigned char keyboardEndpointAddress;
+    
+    unsigned char inEndpointAddress;
+    struct libusb_transfer *inTransfer;
+    char inBuffer[DATA_LEN];
 
-    // uint8_t transferSubmitted;
-    struct libusb_transfer *transfer;
+    unsigned char outEndpointAddress;
+    struct libusb_transfer *outTransfer;
+    char outBuffer[DATA_LEN];
+
     uint8_t cancelCompleted;
-    char interruptData[DATA_LEN];
 } ProgramState;
+
+// TODO: ehhh, a da się bez globalnych zmiennych?
+// btw. globalne żeby funkcje z device_interface.h miały dostęp do tej struktury.
+static ProgramState* __programState = NULL;
 
 void* libusbMainLoop(void* arg);
 void initLibusbThread(ProgramState* programState)
@@ -82,12 +91,12 @@ void closeDeviceAndStop(ProgramState* programState)
     printf("[closeDeviceAndStop] mutex exit\n");
 }
 
-void keyboardInterrupt(struct libusb_transfer *transfer)
+void inTransferCallback(struct libusb_transfer *transfer)
 {
     ProgramState* programState = (ProgramState*)transfer->user_data;
     // programState->transferSubmitted = 0; // No mutex to be as fast as fuck.
 
-    printf("Interrup callback\n"
+    printf("inTransferCallback "
             "Status: (0x%x) ", transfer->status);
         switch(transfer->status)
         {
@@ -134,7 +143,7 @@ void keyboardInterrupt(struct libusb_transfer *transfer)
             return;
         }
 
-        libusb_fill_interrupt_transfer(transfer, programState->deviceHandle, programState->keyboardEndpointAddress, programState->interruptData, DATA_LEN, keyboardInterrupt, programState, INTERRUPT_TIMEOUT_MS);
+        libusb_fill_interrupt_transfer(transfer, programState->deviceHandle, programState->inEndpointAddress, programState->inBuffer, DATA_LEN, inTransferCallback, programState, INTERRUPT_TIMEOUT_MS);
         int err = libusb_submit_transfer(transfer);
         if (err)
         {
@@ -143,7 +152,52 @@ void keyboardInterrupt(struct libusb_transfer *transfer)
             // closeDeviceAndStop(programState);
         }
 
+        static uint8_t dumVolume = 0;
+        setVolume(dumVolume++);
+
         // printf("Next transfer submitted\n");
+}
+
+
+void outTransferCallback(struct libusb_transfer *transfer)
+{
+    ProgramState* programState = (ProgramState*)transfer->user_data;
+    // programState->transferSubmitted = 0; // No mutex to be as fast as fuck.
+
+    printf("outTransferCallback "
+            "Status: (0x%x) ", transfer->status);
+        switch(transfer->status)
+        {
+            case LIBUSB_TRANSFER_COMPLETED: printf("LIBUSB_TRANSFER_COMPLETED\n"); break;
+            case LIBUSB_TRANSFER_ERROR: printf("LIBUSB_TRANSFER_ERROR\n"); break;
+            case LIBUSB_TRANSFER_TIMED_OUT: printf("LIBUSB_TRANSFER_TIMED_OUT\n"); break;
+            case LIBUSB_TRANSFER_CANCELLED: printf("LIBUSB_TRANSFER_CANCELLED\n"); break;
+            case LIBUSB_TRANSFER_STALL: printf("LIBUSB_TRANSFER_STALL\n"); break;
+            case LIBUSB_TRANSFER_NO_DEVICE: printf("LIBUSB_TRANSFER_NO_DEVICE\n"); break;
+            case LIBUSB_TRANSFER_OVERFLOW: printf("LIBUSB_TRANSFER_OVERFLOW\n"); break;
+            default: printf("idk lol\n"); break;
+        }
+
+        if (transfer->status == LIBUSB_TRANSFER_COMPLETED)
+        {
+            printf("Out transfer completed\n");
+        }
+
+        if (transfer->status == LIBUSB_TRANSFER_STALL)
+        {
+            printf("Stall\n");
+            // TODO: Retry?
+        }
+
+        if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE 
+            || transfer->status == LIBUSB_TRANSFER_ERROR
+            || transfer->status == LIBUSB_TRANSFER_CANCELLED)
+        {
+            programState->cancelCompleted = 1;
+            // We can't close handle here since it will stop the libusb loop immediately.
+            // closeDeviceAndStop(programState);
+            return;
+        }
 }
 
 
@@ -171,6 +225,7 @@ int main() {
     //  Initialization and gathering information.
     //
     ProgramState programState = {0};
+    __programState = &programState;
 
     libusb_device** devices;
     libusb_device* pico = NULL;
@@ -240,13 +295,13 @@ int main() {
                 printf("bSynchAddress: 0x%x\n", endpoint->bSynchAddress);
                 printf("--------------\n");
 
-                // if (i == 0 && endpoint->bEndpointAddress == 0x81) // The in endpoint.
                 if (i == 0 && (endpoint->bEndpointAddress & 0x80)) // The in endpoint.
-                // if (i == 0 && (endpoint->bEndpointAddress == 0x2)) // The in endpoint.
                 {
-                    printf("Endpoint set! 0x%x\n", endpoint->bEndpointAddress);
-                    programState.keyboardEndpointAddress = endpoint->bEndpointAddress;
-                    // programState.keyboardEndpointAddress = endpoint->bEndpointAddress;
+                    programState.inEndpointAddress = endpoint->bEndpointAddress;
+                }
+                else if ( j < 2)// out endpoint
+                {
+                    programState.outEndpointAddress = endpoint->bEndpointAddress;
                 }
             }
             printf("==============\n");
@@ -285,18 +340,29 @@ int main() {
         */
           
 
-        programState.transfer = libusb_alloc_transfer(0);
+        programState.inTransfer = libusb_alloc_transfer(0);
+        programState.outTransfer = libusb_alloc_transfer(0);
+
+        if (!programState.inTransfer || !programState.outTransfer)
+        {
+            printf("!programState.inTransfer || !programState.outTransfer\n");
+            return -1;
+        }
+
+
+        setVolume(12);
+
         libusb_fill_interrupt_transfer(
-            programState.transfer, 
+            programState.inTransfer, 
             handle, 
-            programState.keyboardEndpointAddress, 
-            programState.interruptData, 
+            programState.inEndpointAddress, 
+            programState.inBuffer, 
             DATA_LEN, 
-            keyboardInterrupt, 
+            inTransferCallback, 
             &programState, 
             INTERRUPT_TIMEOUT_MS);
 
-        err = libusb_submit_transfer(programState.transfer);
+        err = libusb_submit_transfer(programState.inTransfer);
         if (err)
         {
             errx(err, "auto detach error: %s\n", libusb_error_name(err));
@@ -312,7 +378,8 @@ int main() {
         char theGuy = getchar();
         printf ("[Char read] '%c'\n", theGuy);
 
-        libusb_cancel_transfer(programState.transfer);
+        libusb_cancel_transfer(programState.inTransfer);
+        libusb_cancel_transfer(programState.outTransfer);
         
         while (!programState.cancelCompleted)
         {
@@ -349,7 +416,8 @@ int main() {
         //
 
         printf("libusb_free_transfer\n");
-        libusb_free_transfer(programState.transfer);
+        libusb_free_transfer(programState.inTransfer);
+        libusb_free_transfer(programState.outTransfer);
 
         printf("libusb_free_config_descriptor\n");
         libusb_free_config_descriptor(activeConfig);
@@ -368,3 +436,35 @@ int main() {
     printf("libusb_exit\n");
     libusb_exit(NULL);
 }
+
+//
+// Device interface implementation.
+
+int init();
+
+void setVolume(uint8_t volumePercent)
+{
+    __programState->outBuffer[0] = ACTION_GET_VOLUME;
+    __programState->outBuffer[1] = volumePercent;
+
+    libusb_fill_interrupt_transfer(
+        __programState->outTransfer, 
+        __programState->deviceHandle, 
+        __programState->outEndpointAddress, 
+        __programState->outBuffer,
+        DATA_LEN, 
+        outTransferCallback, 
+        __programState, 
+        INTERRUPT_TIMEOUT_MS);
+
+    int err = libusb_submit_transfer(__programState->outTransfer);
+    if (err)
+    {
+        errx(err, "[out]libusb_submit_transfer: %s\n", libusb_error_name(err));
+    }
+}
+// void setActionCallback(ActionCallback callback);
+void setActionCallback(ActionCallback);
+
+//
+//

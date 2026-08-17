@@ -10,6 +10,7 @@ typedef enum
     ACTION_DEC1         = 4,
     ACTION_SET24        = 5,
     ACTION_SET29        = 6,
+    ACTION_GET_VOLUME   = 7,
 
     ACTION_LAST,
 } DeviceAction;
