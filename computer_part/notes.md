@@ -35,9 +35,10 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
 ## Plan:
 1. libUsb na komputerze & tinyUsb na urządzeniu
     b. pierw spróbować obsłużyć np klawiaturę przez libusb??
-        1. Znajdź pico przez libusb
-        2. otwórz
-        3. Prześlij/odbierz dane.
+        [x]1. Znajdź pico przez libusb
+        [x]2. otwórz
+        [x]3. Prześlij/odbierz dane.
+        -> 4. Połącz usb_protocol_basic i audio.c
         ----
         1. To samo z gadgetem, może przez ten interfejs configfs (https://docs.kernel.org/usb/gadget_configfs.html)
     a. jak zamockować urządzenie usb do testowania?

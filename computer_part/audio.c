@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdatomic.h>
+#include <device_interface.h>
 
 #define SMALL_STR_LEN 128
 #define MEDIUM_STR_LEN 256
@@ -73,6 +74,7 @@ typedef struct
 {
     uint32_t taken;
     uint32_t objIndex;
+    int action;
     pa_subscription_event_type_t objType;
     pa_subscription_event_type_t eventType;
 } OperationParams;
@@ -95,9 +97,10 @@ typedef struct {
     
     SinkInputInfo sinkInputs[SINK_INPUTS_N];
 
-    OperationParams params;
+    OperationParams params; // Maybe unused?
     OperationParamsCb operations;
-    // pthread_mutex_t operationsMutex;
+    pthread_mutex_t operationsMutex;
+
     ItcStruct* itc;
 } OperationState;
 
@@ -128,7 +131,7 @@ void pa_sourcelist_cb(pa_context *c, const pa_source_info *l, int eol, void *use
 void sink_input_info_cb(pa_context *c, const pa_sink_input_info *i, int eol, void *userdata);
 void remove_sink_input(OperationState* operationState, uint32_t index);
 
-void QueueOperation(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType, pa_subscription_event_type_t eventType);
+void QueueOperation(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType, pa_subscription_event_type_t eventType, int action);
 void FetchOperation(OperationState* operationState);
 
 // W pierwszym kroku:
@@ -145,23 +148,23 @@ void FetchOperation(OperationState* operationState);
 // * Przycisk wyciszenia
 // ====================================
 // W kolejnym kroku
-// 1. subskrybuj eventy
-// 2. jednocześnie pozwalaj na input
+// [x] 1. subskrybuj eventy
+//     2. jednocześnie pozwalaj na input
 // ====================================
 // później na spokojnie
+// 0.1. Poprawne zamykanie aplikacji? (Może być potrzebne gdy system odłączy sterownik po odłączeniu urządzenia)
 // 1. Zmiana głośności sink inputa youtuba (może się resetować przy zmianie filmu, bo zmiana nie pochodzi z ui)
-// 2. 
 
 
-void setAction(ItcStruct* itc, int action);
+void setAction(OperationState* operationState, int action);
 int WaitForAction(ItcStruct* itc);
 void OperationCompleted(ItcStruct* itc);
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInputInfo* sinkInputs, int action, ItcStruct*);
+int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInputInfo* sinkInputs, int action, OperationState*);
 
 void* inputThread(void* arg)
 {
-    ItcStruct* itc = (ItcStruct*)arg;
-    assert(itc);
+    OperationState* operationState = (OperationState*)arg;
+    assert(operationState);
 
     int running = 1;
     char actionChar = '\0';
@@ -196,20 +199,20 @@ void* inputThread(void* arg)
             }
             printf("\n");
 
-            setAction(itc, action);
+            setAction(operationState, action);
         }
     }
 }
 
-// void mainloopAquire(ItcStruct* itc);
-// void mainloopRelease(ItcStruct* itc);
-
-void initInputThread(pthread_t* thread, ItcStruct* itc)
+void initInputThread(pthread_t* thread, OperationState* operationState)
 {
-    assert(thread && itc);
+    assert(thread && operationState);
+    // TODO:
+    // TODO: Gracefully destroy this shit after exit.
     if (
-           sem_init(&(itc->actionReady), 0, 0)
-        || sem_init(&(itc->actionConsumed), 0, 1)
+           sem_init(&(operationState->itc->actionReady), 0, 0)
+        || sem_init(&(operationState->itc->actionConsumed), 0, 1)
+        || pthread_mutex_init(&operationState->operationsMutex, NULL)
     )
     {
         printf("Failed to initialize itc\n");
@@ -218,26 +221,17 @@ void initInputThread(pthread_t* thread, ItcStruct* itc)
     }
     
 
-    if (pthread_create(thread, NULL, inputThread, (void*)itc) != 0)
+    if (pthread_create(thread, NULL, inputThread, (void*)operationState) != 0)
     {
         printf("Failed to create input thread\n");
     }
 }
 
-void setAction(ItcStruct* itc, int action)
+void setAction(OperationState* operationState, int action)
 {
-    // Unlocked by mainloop.
-    sem_wait(&(itc->actionConsumed));
-    // if (!itc->initial)
-    // {
-        // Pulse audio może se blokować jak nic się nie dzieje.
-        pa_mainloop_wakeup(itc->mainloop);
-    // }
 
-    itc->action = action;
-    
-    // Signal the mainloop that action is ready to execute.
-    sem_post(&itc->actionReady);
+    QueueOperation(operationState, 0, 0, 0, action);
+    FetchOperation(operationState);
 }
 
 int WaitForAction(ItcStruct* itc)
@@ -283,10 +277,16 @@ int main(int argc, char *argv[]) {
     pthread_t inputThread;
     ItcStruct itc = {0};
     itc.initial = 1;
-    initInputThread(&inputThread, &itc);
+
+    OperationState operationState = {0};
+    operationState.state = STATE_INCORRECT;
+    operationState.itc = &itc;
+    operations_cb_init(&operationState.operations);
+
+    initInputThread(&inputThread, &operationState);
 
 
-    if (pa_get_devicelist(pa_input_devicelist, pa_output_devicelist, sinkInputInfoList, action, &itc) < 0) {
+    if (pa_get_devicelist(pa_input_devicelist, pa_output_devicelist, sinkInputInfoList, action, &operationState) < 0) {
         fprintf(stderr, "failed to get device list\n");
         return 1;
     }
@@ -511,7 +511,7 @@ void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t idx, v
     if (   (objectType == PA_SUBSCRIPTION_EVENT_SINK && eventType == PA_SUBSCRIPTION_EVENT_CHANGE)
         || (objectType == PA_SUBSCRIPTION_EVENT_SINK_INPUT))
     {
-        QueueOperation(operation, idx, objectType, eventType);
+        QueueOperation(operation, idx, objectType, eventType, ACTION_UPDATE_OBJ);
     }
     // if (operation->state == STATE_INITALIZED)
     // {
@@ -529,7 +529,7 @@ void context_success_cb(pa_context *c, int success, void *userdata)
 }
 
 
-void QueueOperation(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType, pa_subscription_event_type_t eventType)
+void QueueOperation(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType, pa_subscription_event_type_t eventType, int action)
 {
     // TODO: To spróbuj zrobić
     // TODO: To spróbuj zrobić
@@ -541,62 +541,46 @@ void QueueOperation(OperationState* operationState, uint32_t id, pa_subscription
     // TODO: To spróbuj zrobić
     // TODO: To spróbuj zrobić
     // TODO: To spróbuj zrobić
-    // if (sem_trywait(&(operationState->itc->actionConsumed)) == -1)
-    // {
-    //     printf("operation in progress. Skipping update\n");
-    //     return;
-    // }
-
+    pthread_mutex_lock(&operationState->operationsMutex);
     OperationParams* params = operations_cb_nextFree(&operationState->operations);
     if (params == NULL)
     {
         printf("operation buffer full. Skipping update\n");
+        pthread_mutex_unlock(&operationState->operationsMutex);
         return;
     }
 
-    // if (operationState->state == STATE_INITIALIZED)
-    // {
-        params->objIndex = id;
-        params->objType = objectType;
-        params->eventType = eventType;
-        
-        FetchOperation(operationState);
+    params->objIndex = id;
+    params->objType = objectType;
+    params->eventType = eventType;
+    params->action = action;
 
-        // operationState->itc->action = ACTION_UPDATE_OBJ;
-        
-        // Signal the mainloop that action is ready to execute.
-        // sem_post(&operationState->itc->actionReady);
-    // }
-    // else
-    // {
-    //     printf("operation in progress. Skipping update1\n");
-    // }
+    pthread_mutex_unlock(&operationState->operationsMutex);
+    FetchOperation(operationState);
 }
 
 void FetchOperation(OperationState* operationState)
 {
+    pthread_mutex_lock(&operationState->operationsMutex);
     OperationParams* operation = operations_cb_front(&operationState->operations);
     if (operation != NULL && operationState->state == STATE_INITIALIZED && operationState->itc->action == ACTION_INCORRECT)
     {
-        operationState->itc->action = ACTION_UPDATE_OBJ;
+        operationState->itc->action = operation->action;
         pa_mainloop_wakeup(operationState->itc->mainloop);
 
         // operations_cb_pop(&operationState->operations);
     }
+    pthread_mutex_unlock(&operationState->operationsMutex);
 }
 // void pa_source_info_cb(pa_context *c, const pa_source_info *i, int eol, void *userdata);
 
 
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInputInfo* sinkInputs, int action, ItcStruct* itc) {
+int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInputInfo* sinkInputs, int action, OperationState* operationState) {
     // Define our pulse audio loop and connection variables
     pa_mainloop *pa_ml;
     pa_mainloop_api *pa_mlapi;
     pa_operation *pa_op = NULL;
     pa_context *pa_ctx;
-    OperationState operationState = {0};
-    operationState.state = STATE_INCORRECT;
-    operationState.itc = itc;
-    operations_cb_init(&operationState.operations);
 
     // int state = STATE_INIT;
     int pa_ready = 0;
@@ -613,7 +597,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
     pa_ml = pa_mainloop_new();
     pa_mlapi = pa_mainloop_get_api(pa_ml);
     pa_ctx = pa_context_new(pa_mlapi, "test");
-    itc->mainloop = pa_ml;
+    operationState->itc->mainloop = pa_ml;
 
     // This function connects to the pulse server
     pa_context_connect(pa_ctx, NULL, 0, NULL);
@@ -624,7 +608,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
     // ready.
     // If there's an error, the callback will set pa_ready to 2
     pa_context_set_state_callback(pa_ctx, pa_state_cb, &pa_ready);
-    pa_context_set_subscribe_callback(pa_ctx, subscribe_cb, &operationState);
+    pa_context_set_subscribe_callback(pa_ctx, subscribe_cb, operationState);
 
     // Now we'll enter into an infinite loop until we get the data we receive
     // or if there's an error
@@ -654,10 +638,10 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
             return -1;
         }
 
-        if ((operationState.state != STATE_INCORRECT) && action == ACTION_INCORRECT)
+        if ((operationState->state != STATE_INCORRECT) && action == ACTION_INCORRECT)
         {
             // printf("Waiting for action\n");
-            action = WaitForAction(itc);
+            action = WaitForAction(operationState->itc);
             if (action == ACTION_INCORRECT)
             {
                 // printf("action incorrect\n");
@@ -666,8 +650,8 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
             // printf("action aquired: %x\n", action);
         }
         
-        // printf("got state: %d\n", operationState.state);
-        switch (operationState.state) {
+        // printf("got state: %d\n", operationState->state);
+        switch (operationState->state) {
             case STATE_INCORRECT: // Need to set up stuff
                 if (isOperation(&pa_op))
                 {
@@ -675,7 +659,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                 }
                 
                 // Setting subscription.
-                if (!operationState.initialized)
+                if (!operationState->initialized)
                 {
                     // initialize stuff
                     pa_op = pa_context_subscribe(
@@ -683,21 +667,21 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                         PA_SUBSCRIPTION_MASK_SINK_INPUT
                         | PA_SUBSCRIPTION_MASK_SINK,
                         context_success_cb,
-                        (void*)&operationState);
+                        (void*)operationState);
                     break;
                 }
 
                 // Getting default sink info
-                if (operationState.defaultSinkName[0] == '\0')
+                if (operationState->defaultSinkName[0] == '\0')
                 {
-                    pa_op = pa_context_get_server_info(pa_ctx, server_info_cb, (void *)&operationState);
+                    pa_op = pa_context_get_server_info(pa_ctx, server_info_cb, (void *)operationState);
                     break;
                 }
 
-                if (!operationState.defaultSink.set)
+                if (!operationState->defaultSink.set)
                 {
-                    printf("Default sink name: '%s'\n", operationState.defaultSinkName);
-                    pa_op = pa_context_get_sink_info_by_name(pa_ctx, operationState.defaultSinkName, sink_info_cb, (void *)&operationState);
+                    printf("Default sink name: '%s'\n", operationState->defaultSinkName);
+                    pa_op = pa_context_get_sink_info_by_name(pa_ctx, operationState->defaultSinkName, sink_info_cb, (void *)operationState);
                     break;
                 }
 
@@ -709,7 +693,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                 pa_op = pa_context_get_sink_input_info_list(
                     pa_ctx,
                     sink_input_info_cb,
-                    &operationState
+                    operationState
                 );
                 pa_operation_unref(pa_op);
                 pa_op = NULL;
@@ -719,7 +703,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                 // TODO: To następne
 
                 printf("state initialized\n");
-                operationState.state = STATE_INITIALIZED;
+                operationState->state = STATE_INITIALIZED;
                 break;
             case STATE_INITIALIZED:
                 if (isOperation(&pa_op))
@@ -729,17 +713,17 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
 
                 if (action & ACTION_VOLUME_SET_MASK)
                 {
-                    if (operationState.defaultSink.set)
+                    if (operationState->defaultSink.set)
                     {
-                        printf("Default sink index: %d\n", operationState.defaultSink.index);
-                        setVolume(&operationState.defaultSink.cvolume, action);
+                        printf("Default sink index: %d\n", operationState->defaultSink.index);
+                        setVolume(&operationState->defaultSink.cvolume, action);
                         pa_op = pa_context_set_sink_volume_by_index(
                             pa_ctx, 
-                            operationState.defaultSink.index, 
-                            &operationState.defaultSink.cvolume, 
+                            operationState->defaultSink.index, 
+                            &operationState->defaultSink.cvolume, 
                             set_volume_success_cb, 
-                            &operationState);
-                        operationState.state = STATE_SETTING_VOLUME;
+                            operationState);
+                        operationState->state = STATE_SETTING_VOLUME;
                         break;
                     }
                     else
@@ -750,10 +734,12 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                 }
                 else if (action == ACTION_UPDATE_OBJ)
                 {
-                    OperationParams* params = operations_cb_front(&operationState.operations);
+                    pthread_mutex_lock(&operationState->operationsMutex);
+                    OperationParams* params = operations_cb_front(&operationState->operations);
                     if (!params)
                     {
-                        operationState.itc->action = ACTION_INCORRECT;
+                        operationState->itc->action = ACTION_INCORRECT;
+                        pthread_mutex_unlock(&operationState->operationsMutex);
                         break;
                     }
 
@@ -767,7 +753,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                                     pa_ctx,
                                     params->objIndex,
                                     sink_info_cb,
-                                    &operationState
+                                    operationState
                                 );
                             }
                             break;
@@ -779,25 +765,26 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                                     pa_ctx,
                                     params->objIndex,
                                     sink_input_info_cb,
-                                    &operationState
+                                    operationState
                                 );
                             }
                             else
                             {
                                 // Idk if callback would be called if object is destroyed.
                                 // (the one above)
-                                remove_sink_input(&operationState, params->objIndex);
+                                remove_sink_input(operationState, params->objIndex);
                             }
                             break;
                             default:
-                                itc->action = ACTION_INCORRECT;
+                                operationState->itc->action = ACTION_INCORRECT;
                     }
-                    operationState.state = itc->action != ACTION_INCORRECT ? STATE_UPDATING_OBJECTS : STATE_INITIALIZED;
+                    operationState->state = operationState->itc->action != ACTION_INCORRECT ? STATE_UPDATING_OBJECTS : STATE_INITIALIZED;
+                    pthread_mutex_unlock(&operationState->operationsMutex);
                     break;
                 }
                 else if (action == ACTION_INCORRECT)
                 {
-                    FetchOperation(&operationState);
+                    FetchOperation(operationState);
                 }
             break;
             case STATE_UPDATING_OBJECTS:
@@ -806,10 +793,12 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                     {
                         break;
                     }
-                    if (action == ACTION_UPDATE_OBJ)
-                    {
-                        operations_cb_pop(&operationState.operations);
-                    }
+                    // if (action == ACTION_UPDATE_OBJ)
+                    // {
+                        pthread_mutex_lock(&operationState->operationsMutex);
+                        operations_cb_pop(&operationState->operations);
+                        pthread_mutex_unlock(&operationState->operationsMutex);
+                    // }
                     // pa_op = NULL;
                     
                     // TODO: botch, just for thread input testing.
@@ -817,12 +806,12 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                     // STATE_INITstate = GET_DEFAULT_SINK_VOLUME;
                     
                     
-                    operationState.params.objIndex = 0;
-                    operationState.params.objType = 0;
-                    operationState.state = STATE_INITIALIZED;
+                    operationState->params.objIndex = 0;
+                    operationState->params.objType = 0;
+                    operationState->state = STATE_INITIALIZED;
                     action = ACTION_INCORRECT;
-                    OperationCompleted(itc);
-                    FetchOperation(&operationState);
+                    OperationCompleted(operationState->itc);
+                    FetchOperation(operationState);
                 break;
             case STATE_SHUTTING_DOWN:
                 if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
@@ -836,7 +825,7 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
 
             default:
                 // We should never see this state
-                fprintf(stderr, "in state %d\n", operationState.state);
+                fprintf(stderr, "in state %d\n", operationState->state);
                 // return -1;
         }
     }

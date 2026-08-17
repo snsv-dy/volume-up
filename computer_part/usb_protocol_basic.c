@@ -39,7 +39,8 @@ typedef struct
     struct libusb_transfer *outTransfer;
     char outBuffer[DATA_LEN];
 
-    uint8_t cancelCompleted;
+    // TODO: Spróbuj napisać na to test?
+    uint8_t nTransfersInProgress;
 } ProgramState;
 
 // TODO: ehhh, a da się bez globalnych zmiennych?
@@ -95,6 +96,7 @@ void inTransferCallback(struct libusb_transfer *transfer)
 {
     ProgramState* programState = (ProgramState*)transfer->user_data;
     // programState->transferSubmitted = 0; // No mutex to be as fast as fuck.
+    programState->nTransfersInProgress--;
 
     printf("inTransferCallback "
             "Status: (0x%x) ", transfer->status);
@@ -137,7 +139,6 @@ void inTransferCallback(struct libusb_transfer *transfer)
             || transfer->status == LIBUSB_TRANSFER_ERROR
             || transfer->status == LIBUSB_TRANSFER_CANCELLED)
         {
-            programState->cancelCompleted = 1;
             // We can't close handle here since it will stop the libusb loop immediately.
             // closeDeviceAndStop(programState);
             return;
@@ -151,9 +152,10 @@ void inTransferCallback(struct libusb_transfer *transfer)
             // We can't close handle here since it will stop the libusb loop immediately.
             // closeDeviceAndStop(programState);
         }
+        programState->nTransfersInProgress++;
 
         static uint8_t dumVolume = 0;
-        setVolume(dumVolume++);
+        volumeChanged(dumVolume++);
 
         // printf("Next transfer submitted\n");
 }
@@ -162,6 +164,7 @@ void inTransferCallback(struct libusb_transfer *transfer)
 void outTransferCallback(struct libusb_transfer *transfer)
 {
     ProgramState* programState = (ProgramState*)transfer->user_data;
+    programState->nTransfersInProgress--;
     // programState->transferSubmitted = 0; // No mutex to be as fast as fuck.
 
     printf("outTransferCallback "
@@ -193,7 +196,6 @@ void outTransferCallback(struct libusb_transfer *transfer)
             || transfer->status == LIBUSB_TRANSFER_ERROR
             || transfer->status == LIBUSB_TRANSFER_CANCELLED)
         {
-            programState->cancelCompleted = 1;
             // We can't close handle here since it will stop the libusb loop immediately.
             // closeDeviceAndStop(programState);
             return;
@@ -213,7 +215,14 @@ void* libusbMainLoop(void* arg)
     return NULL;
 }
 
+#ifdef STANDALONE_USB
 int main() {
+    driverInit();
+}
+#endif
+
+int driverInit()
+{
     int init = libusb_init(NULL); // NULL is the default libusb_context
     int err = 0;
 
@@ -350,7 +359,7 @@ int main() {
         }
 
 
-        setVolume(12);
+        volumeChanged(12);
 
         libusb_fill_interrupt_transfer(
             programState.inTransfer, 
@@ -381,7 +390,7 @@ int main() {
         libusb_cancel_transfer(programState.inTransfer);
         libusb_cancel_transfer(programState.outTransfer);
         
-        while (!programState.cancelCompleted)
+        while (programState.nTransfersInProgress)
         {
             // Timeout for cancellation to execute.
             usleep(1000 * 100);
@@ -440,9 +449,9 @@ int main() {
 //
 // Device interface implementation.
 
-int init();
+// int init();
 
-void setVolume(uint8_t volumePercent)
+void volumeChanged(uint8_t volumePercent)
 {
     __programState->outBuffer[0] = ACTION_GET_VOLUME;
     __programState->outBuffer[1] = volumePercent;
@@ -462,6 +471,7 @@ void setVolume(uint8_t volumePercent)
     {
         errx(err, "[out]libusb_submit_transfer: %s\n", libusb_error_name(err));
     }
+    __programState->nTransfersInProgress++;
 }
 // void setActionCallback(ActionCallback callback);
 void setActionCallback(ActionCallback);

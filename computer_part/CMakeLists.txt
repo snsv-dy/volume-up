@@ -5,6 +5,8 @@ cmake_minimum_required(VERSION 3.13)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 project(audio C CXX)
 # Add executable. Default name is the project name, version 0.1
 
@@ -18,6 +20,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 # Add any user requested libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE
     pulse
+    usb_protocol_basic
 )
 
 
@@ -54,7 +57,7 @@ target_include_directories(gui PRIVATE
 )
 # message(WARNING ${PARENT_DIR})
 
-add_executable(usb_protocol_basic usb_protocol_basic.c)
+add_library(usb_protocol_basic SHARED usb_protocol_basic.c)
 
 target_include_directories(usb_protocol_basic PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}

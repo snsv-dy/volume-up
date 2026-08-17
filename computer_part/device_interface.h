@@ -6,8 +6,8 @@
 typedef void (*ActionCallback)(uint32_t action);
 
 // 0 - success else not inited.
-int init();
-void setVolume(uint8_t volumePercent);
+int driverInit();
+void volumeChanged(uint8_t volumePercent);
 // void setActionCallback(ActionCallback callback);
 void setActionCallback(ActionCallback);
 
