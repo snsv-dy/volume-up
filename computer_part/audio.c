@@ -1,8 +1,10 @@
 #include <stdio.h>
+#include <unistd.h>
 #include <string.h>
 #include <pulse/pulseaudio.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <signal.h>
 #include <stdatomic.h>
 #include <device_interface.h>
 
@@ -22,6 +24,7 @@ enum
     ACTION_SET29        = 0b0100000,
     ACTION_VOLUME_SET_MASK  = 0b0111111,
     ACTION_UPDATE_OBJ   = 0b1000000,
+    ACTION_SHUT_DOWN   = 0b10000000,
 };
 
 enum {
@@ -102,6 +105,8 @@ typedef struct {
     pthread_mutex_t operationsMutex;
 
     ItcStruct* itc;
+    sem_t deviceThreadSem;
+    int running; // Na razie tylko w wątku urządzenia.
 } OperationState;
 
 //
@@ -159,9 +164,9 @@ void FetchOperation(OperationState* operationState);
 void setAction(OperationState* operationState, int action);
 int WaitForAction(ItcStruct* itc);
 void OperationCompleted(ItcStruct* itc);
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInputInfo* sinkInputs, int action, OperationState*);
+int pulseaudioMainLoop(OperationState* operationState);
 
-void* inputThread(void* arg)
+void* stdinInputThread(void* arg)
 {
     OperationState* operationState = (OperationState*)arg;
     assert(operationState);
@@ -204,6 +209,55 @@ void* inputThread(void* arg)
     }
 }
 
+void actionFromDeviceCallback(uint32_t action, void* userData)
+{
+    OperationState* operationState = (OperationState*)userData;
+    uint32_t paAction = 0;
+    switch(action)
+    {
+        case 1: paAction = 0b0000001; break; //ACTION_INC5  ACTION_INC5
+        case 2: paAction = 0b0000010; break; //ACTION_DEC5  ACTION_DEC5
+        case 3: paAction = 0b0000100; break; //ACTION_INC1  ACTION_INC1
+        case 4: paAction = 0b0001000; break; //ACTION_DEC1  ACTION_DEC1
+        case 5: paAction = 0b0010000; break; //ACTION_SET24 ACTION_SET24
+        case 6: paAction = 0b0100000; break; //ACTION_SET29 ACTION_SET29
+        case 7: paAction = 0; break; //ACTION_GET_VOLUME   = ,
+    }
+
+    printf("[audio.c] got action: %x\n", paAction);
+
+    setAction(operationState, paAction);
+}
+
+void* inputThread(void* arg)
+{
+    OperationState* operationState = (OperationState*)arg;
+    assert(operationState);
+
+    char actionChar = '\0';
+    int action;
+
+    // #define INIT_RETRIES 2
+    // while(running)
+    // {
+        // if (moduleState == MODULE_STATE_INCORRECT)
+        // {
+    printf("Trying to connect to device\n");
+    const int maxRetries = 2;
+    int nRetries = 0;
+    while (operationState->running && nRetries++ < maxRetries && driverInit(actionFromDeviceCallback, arg, &operationState->deviceThreadSem))
+    {
+        if (!operationState->running)
+        {
+            break;
+        }
+        usleep(1000 * 1000); // 1000ms
+    }
+    printf("[inputThread] exit.\n");
+        // }
+    // }
+}
+
 void initInputThread(pthread_t* thread, OperationState* operationState)
 {
     assert(thread && operationState);
@@ -213,12 +267,14 @@ void initInputThread(pthread_t* thread, OperationState* operationState)
            sem_init(&(operationState->itc->actionReady), 0, 0)
         || sem_init(&(operationState->itc->actionConsumed), 0, 1)
         || pthread_mutex_init(&operationState->operationsMutex, NULL)
+        || sem_init(&(operationState->deviceThreadSem), 0, 0)
     )
     {
         printf("Failed to initialize itc\n");
         // exit here;
         return;
     }
+    operationState->running = 1;
     
 
     if (pthread_create(thread, NULL, inputThread, (void*)operationState) != 0)
@@ -231,7 +287,7 @@ void setAction(OperationState* operationState, int action)
 {
 
     QueueOperation(operationState, 0, 0, 0, action);
-    FetchOperation(operationState);
+    // FetchOperation(operationState);
 }
 
 int WaitForAction(ItcStruct* itc)
@@ -249,29 +305,43 @@ void OperationCompleted(ItcStruct* itc)
     sem_post(&itc->actionConsumed);
 }
 
+// For the interrupt signal handler 
+// (Proszę zachować szczególną ostrożność podczas używania)
+static OperationState* __globalOperationState = NULL;
+
+void interruptSignalHandler()
+{
+    if (!__globalOperationState)
+    {
+        printf("[ctrl+c] !__globalOperationState\n");
+    }
+    printf("[ctrl+c] Received\n");
+    
+    // Zamykanie wątku komunikacji z urządzeniem.
+    __globalOperationState->running = 0; // TODO: atomic or mutex for this?
+    sem_post(&__globalOperationState->deviceThreadSem);
+    // Zamykanie wątku pulseaudio.
+    QueueOperation(__globalOperationState, 0, 0, 0, ACTION_SHUT_DOWN);
+
+    printf("[ctrl+c] Finished\n");
+}
+
+void initInterruptSignal()
+{
+    struct sigaction sa;
+    sa.sa_handler = interruptSignalHandler;  
+    sa.sa_flags = SA_RESTART;  
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGINT, &sa, NULL))
+    {
+        printf("Failed to set SIGINT action\n");
+    }
+}
+
 int main(int argc, char *argv[]) {
     // operationsCbTests();
     // return 0;
-
-    int action = ACTION_INC1;
-    if (argc > 1)
-    {
-             if (argv[1][0] == '+') { action = ACTION_INC5; }
-        else if (argv[1][0] == '-') { action = ACTION_DEC5; }
-        else if (argv[1][0] == 'i') { action = ACTION_INC1; }
-        else if (argv[1][0] == 'd') { action = ACTION_DEC1; }
-        else if (argv[1][0] == '4') { action = ACTION_SET24; }
-        else if (argv[1][0] == '9') { action = ACTION_SET29; }
-    }
-
     int ctr;
-
-    // This is where we'll store the input device list
-    pa_devicelist_t pa_input_devicelist[16];
-
-    // This is where we'll store the output device list
-    pa_devicelist_t pa_output_devicelist[16];
-    SinkInputInfo sinkInputInfoList[16];
 
     // pa_context_subscribe();
     pthread_t inputThread;
@@ -279,55 +349,26 @@ int main(int argc, char *argv[]) {
     itc.initial = 1;
 
     OperationState operationState = {0};
+    __globalOperationState = &operationState;
     operationState.state = STATE_INCORRECT;
     operationState.itc = &itc;
     operations_cb_init(&operationState.operations);
 
+    initInterruptSignal();
+
     initInputThread(&inputThread, &operationState);
+    printf("input thread inited\n");
 
-
-    if (pa_get_devicelist(pa_input_devicelist, pa_output_devicelist, sinkInputInfoList, action, &operationState) < 0) {
-        fprintf(stderr, "failed to get device list\n");
+    if (pulseaudioMainLoop(&operationState) < 0) {
+        fprintf(stderr, "failed to start pulseaudio\n");
         return 1;
     }
-
-    for (ctr = 0; ctr < 16; ctr++) {
-        if (! pa_output_devicelist[ctr].initialized) {
-            break;
-        }
-        printf("=======[ Output Device #%d ]=======\n", ctr+1);
-        printf("Description: %s\n", pa_output_devicelist[ctr].description);
-        printf("Name: %s\n", pa_output_devicelist[ctr].name);
-        printf("Index: %d\n", pa_output_devicelist[ctr].index);
-        printf("\n");
-    }
-
-    for (ctr = 0; ctr < 16; ctr++) {
-        if (! pa_input_devicelist[ctr].initialized) {
-            break;
-        }
-        printf("=======[ Input Device #%d ]=======\n", ctr+1);
-        printf("Description: %s\n", pa_input_devicelist[ctr].description);
-        printf("Name: %s\n", pa_input_devicelist[ctr].name);
-        printf("Index: %d\n", pa_input_devicelist[ctr].index);
-        printf("\n");
-    }
+    printf("Mainloop exit\n");
 
     pthread_join(inputThread, NULL);
 
     return 0;
 }
-
-// pa_operation* GetSinkInputs(pa_context *pa_ctx, SinkInputInfo* sinkInputs, int* state)
-// {
-//     return pa_context_get_sink_input_info_list(
-//         pa_ctx,
-//         pa_sink_input_info_cb,
-//         sinkInputs
-//     );
-//     // Update the state so we know what to do next
-//     (*state)++;
-// }
 
 
 
@@ -561,21 +602,26 @@ void QueueOperation(OperationState* operationState, uint32_t id, pa_subscription
 
 void FetchOperation(OperationState* operationState)
 {
+    // TODO: Debug with device attached. (sudo or add device to udev)
     pthread_mutex_lock(&operationState->operationsMutex);
     OperationParams* operation = operations_cb_front(&operationState->operations);
     if (operation != NULL && operationState->state == STATE_INITIALIZED && operationState->itc->action == ACTION_INCORRECT)
     {
         operationState->itc->action = operation->action;
         pa_mainloop_wakeup(operationState->itc->mainloop);
-
+        printf("waking Mainloop\n");
         // operations_cb_pop(&operationState->operations);
+    }
+    else
+    {
+        printf("FetchOperation: %d %d %d\n", operation != NULL, operationState->state, operationState->itc->action == ACTION_INCORRECT);
     }
     pthread_mutex_unlock(&operationState->operationsMutex);
 }
 // void pa_source_info_cb(pa_context *c, const pa_source_info *i, int eol, void *userdata);
 
 
-int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInputInfo* sinkInputs, int action, OperationState* operationState) {
+int pulseaudioMainLoop(OperationState* operationState) {
     // Define our pulse audio loop and connection variables
     pa_mainloop *pa_ml;
     pa_mainloop_api *pa_mlapi;
@@ -589,9 +635,9 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
     SmallerSinkInfo defaultSinkInfo = {0};
 
     // Initialize our device lists
-    memset(input, 0, sizeof(pa_devicelist_t) * 16);
-    memset(output, 0, sizeof(pa_devicelist_t) * 16);
-    memset(sinkInputs, 0, sizeof(SinkInputInfo) * 16);
+    // memset(input, 0, sizeof(pa_devicelist_t) * 16);
+    // memset(output, 0, sizeof(pa_devicelist_t) * 16);
+    // memset(sinkInputs, 0, sizeof(SinkInputInfo) * 16);
 
     // Create a mainloop API and connection to the default server
     pa_ml = pa_mainloop_new();
@@ -614,15 +660,20 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
     // or if there's an error
     // pa_mainloop_run(pa_ml);
     // return;
-
-    action = ACTION_INCORRECT;
+    int first = 1;
+    printf("[audio.c]begin loop\n");
+    int action = ACTION_INCORRECT;
     for (;;) {
 
         // Iterate the main loop and go again.  The second argument is whether
         // or not the iteration should block until something is ready to be
         // done.  Set it to zero for non-blocking.
-        pa_mainloop_iterate(pa_ml, 1, NULL);
-
+        if (!first)
+        {
+            pa_mainloop_iterate(pa_ml, 1, NULL);
+        }
+        first = 0;
+        printf("[audio.c]iterate\n");
 
         // We can't do anything until PA is ready, so just iterate the mainloop
         // and continue
@@ -781,6 +832,13 @@ int pa_get_devicelist(pa_devicelist_t *input, pa_devicelist_t *output, SinkInput
                     operationState->state = operationState->itc->action != ACTION_INCORRECT ? STATE_UPDATING_OBJECTS : STATE_INITIALIZED;
                     pthread_mutex_unlock(&operationState->operationsMutex);
                     break;
+                }
+                else if (action == ACTION_SHUT_DOWN)
+                {
+                    pa_context_disconnect(pa_ctx);
+                    pa_context_unref(pa_ctx);
+                    pa_mainloop_free(pa_ml);
+                    return 0;
                 }
                 else if (action == ACTION_INCORRECT)
                 {

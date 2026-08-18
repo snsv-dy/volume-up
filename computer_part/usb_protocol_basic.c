@@ -41,6 +41,9 @@ typedef struct
 
     // TODO: Spróbuj napisać na to test?
     uint8_t nTransfersInProgress;
+
+    void* userData;
+    ActionCallback actionCallback;
 } ProgramState;
 
 // TODO: ehhh, a da się bez globalnych zmiennych?
@@ -133,6 +136,8 @@ void inTransferCallback(struct libusb_transfer *transfer)
                 case ACTION_DEC5: printf("Received -5%% action\n"); break;
                 default: printf("default action\n");
             }
+
+            programState->actionCallback(action, programState->userData);
         }
 
         if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE 
@@ -154,8 +159,8 @@ void inTransferCallback(struct libusb_transfer *transfer)
         }
         programState->nTransfersInProgress++;
 
-        static uint8_t dumVolume = 0;
-        volumeChanged(dumVolume++);
+        // static uint8_t dumVolume = 0;
+        // volumeChanged(dumVolume++);
 
         // printf("Next transfer submitted\n");
 }
@@ -221,8 +226,13 @@ int main() {
 }
 #endif
 
-int driverInit()
+int driverInit(ActionCallback callback, void* userData, sem_t* closing)
 {
+    if (!callback || !userData || !closing)
+    {
+        return 1;
+    }
+
     int init = libusb_init(NULL); // NULL is the default libusb_context
     int err = 0;
 
@@ -235,6 +245,8 @@ int driverInit()
     //
     ProgramState programState = {0};
     __programState = &programState;
+    programState.userData = userData;
+    programState.actionCallback = callback;
 
     libusb_device** devices;
     libusb_device* pico = NULL;
@@ -245,10 +257,10 @@ int driverInit()
     {
         libusb_get_device_descriptor(devices[i], &lastDescriptor);
 
-        printf("Device class: %x, vendor: %x\n", lastDescriptor.bDeviceClass, lastDescriptor.idVendor);
+        // printf("Device class: %x, vendor: %x\n", lastDescriptor.bDeviceClass, lastDescriptor.idVendor);
         if (lastDescriptor.idVendor == 0xcafe)
         {
-            printf("Jes pi!!\n");
+            printf("Pi znalezione!!!\n");
             pico = devices[i];
             break;
         }
@@ -259,7 +271,7 @@ int driverInit()
         struct libusb_config_descriptor* activeConfig;
         err = libusb_get_active_config_descriptor(pico, &activeConfig);
         if (err)
-        {
+        {   
             errx(err, "libusb_get_active_config_descriptor");
             return err;
         }
@@ -279,30 +291,30 @@ int driverInit()
             const struct libusb_interface_descriptor* interfaceDescriptor = &interface->altsetting[0];
             
             
-            printf("bLength: 0x%x\n", interfaceDescriptor->bLength);
-            printf("bDescriptorType: 0x%x\n", interfaceDescriptor->bDescriptorType);
-            printf("bInterfaceNumber: 0x%x\n", interfaceDescriptor->bInterfaceNumber);
-            printf("bAlternateSetting: 0x%x\n", interfaceDescriptor->bAlternateSetting);
-            printf("bNumEndpoints: %d\n", interfaceDescriptor->bNumEndpoints);
-            printf("bInterfaceClass: 0x%x\n", interfaceDescriptor->bInterfaceClass);
-            printf("bInterfaceSubClass: 0x%x\n", interfaceDescriptor->bInterfaceSubClass);
-            printf("bInterfaceProtocol: 0x%x\n", interfaceDescriptor->bInterfaceProtocol);
-            printf("iInterface: 0x%x\n", interfaceDescriptor->iInterface);
-            printf("extra_length: %u\n", interfaceDescriptor->extra_length);
-            printf("--------------\n");
+            // printf("bLength: 0x%x\n", interfaceDescriptor->bLength);
+            // printf("bDescriptorType: 0x%x\n", interfaceDescriptor->bDescriptorType);
+            // printf("bInterfaceNumber: 0x%x\n", interfaceDescriptor->bInterfaceNumber);
+            // printf("bAlternateSetting: 0x%x\n", interfaceDescriptor->bAlternateSetting);
+            // printf("bNumEndpoints: %d\n", interfaceDescriptor->bNumEndpoints);
+            // printf("bInterfaceClass: 0x%x\n", interfaceDescriptor->bInterfaceClass);
+            // printf("bInterfaceSubClass: 0x%x\n", interfaceDescriptor->bInterfaceSubClass);
+            // printf("bInterfaceProtocol: 0x%x\n", interfaceDescriptor->bInterfaceProtocol);
+            // printf("iInterface: 0x%x\n", interfaceDescriptor->iInterface);
+            // printf("extra_length: %u\n", interfaceDescriptor->extra_length);
+            // printf("--------------\n");
             for (int j = 0; j < interfaceDescriptor->bNumEndpoints; j++)
             {
                 const struct libusb_endpoint_descriptor *endpoint = (const struct libusb_endpoint_descriptor *)&interfaceDescriptor->endpoint[j];
-                printf("Endpoint %d\n", j);
-                printf("bLength: 0x%x\n", endpoint->bLength);
-                printf("bDescriptorType: 0x%x\n", endpoint->bDescriptorType);
-                printf("bEndpointAddress: 0x%x\n", endpoint->bEndpointAddress);
-                printf("bmAttributes: 0x%x\n", endpoint->bmAttributes);
-                printf("wMaxPacketSize: %d\n", endpoint->wMaxPacketSize);
-                printf("bInterval: %d\n", endpoint->bInterval);
-                printf("bRefresh: 0x%x\n", endpoint->bRefresh);
-                printf("bSynchAddress: 0x%x\n", endpoint->bSynchAddress);
-                printf("--------------\n");
+                // printf("Endpoint %d\n", j);
+                // printf("bLength: 0x%x\n", endpoint->bLength);
+                // printf("bDescriptorType: 0x%x\n", endpoint->bDescriptorType);
+                // printf("bEndpointAddress: 0x%x\n", endpoint->bEndpointAddress);
+                // printf("bmAttributes: 0x%x\n", endpoint->bmAttributes);
+                // printf("wMaxPacketSize: %d\n", endpoint->wMaxPacketSize);
+                // printf("bInterval: %d\n", endpoint->bInterval);
+                // printf("bRefresh: 0x%x\n", endpoint->bRefresh);
+                // printf("bSynchAddress: 0x%x\n", endpoint->bSynchAddress);
+                // printf("--------------\n");
 
                 if (i == 0 && (endpoint->bEndpointAddress & 0x80)) // The in endpoint.
                 {
@@ -313,28 +325,28 @@ int driverInit()
                     programState.outEndpointAddress = endpoint->bEndpointAddress;
                 }
             }
-            printf("==============\n");
+            // printf("==============\n");
         }
 
         libusb_device_handle* handle;
         err = libusb_open(pico, &handle);
         if (err)
         {
-            errx(err, "err open: %s\n", libusb_error_name(err));
+            printf("err open: %s\n", libusb_error_name(err));
             return err;
         }
         programState.deviceHandle = handle;
         err = libusb_set_auto_detach_kernel_driver(handle, 1);
         if (err)
         {
-            errx(err, "auto detach error: %s\n", libusb_error_name(err));
+            printf("auto detach error: %s\n", libusb_error_name(err));
             return err;
         }
 
         err = libusb_claim_interface(handle, KEYBOARD_INTERFACE);
         if (err)
         {
-            errx(err, "auto detach error: %s\n", libusb_error_name(err));
+            printf("auto detach error: %s\n", libusb_error_name(err));
         }
 
         /*
@@ -359,7 +371,7 @@ int driverInit()
         }
 
 
-        volumeChanged(12);
+        // volumeChanged(12);
 
         libusb_fill_interrupt_transfer(
             programState.inTransfer, 
@@ -384,8 +396,11 @@ int driverInit()
         initLibusbThread(&programState);
 
         printf("Any key to close application\n");
-        char theGuy = getchar();
-        printf ("[Char read] '%c'\n", theGuy);
+        // char theGuy = getchar();
+        sem_wait(closing);
+        printf ("[sem posted]\n");
+
+        // printf ("[Char read] '%c'\n", theGuy);
 
         libusb_cancel_transfer(programState.inTransfer);
         libusb_cancel_transfer(programState.outTransfer);
@@ -474,7 +489,11 @@ void volumeChanged(uint8_t volumePercent)
     __programState->nTransfersInProgress++;
 }
 // void setActionCallback(ActionCallback callback);
-void setActionCallback(ActionCallback);
+
+void setActionCallback(ActionCallback, void* userData)
+{
+
+}
 
 //
 //

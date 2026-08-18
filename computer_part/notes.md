@@ -29,8 +29,19 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
 * https://docs.kernel.org/usb/gadget_configfs.html
 * https://www.reactivated.net/writing_udev_rules.html
 * https://github.com/piersfinlayson/tinyusb-vendor-example
+* https://unix.stackexchange.com/questions/44308/understanding-udev-rules-and-permissions-in-libusb
+===============================================================
+Komendy:
 * sudo cat /sys/kernel/debug/usb/devices
 * lsusb -s 001:006 -v
+* udevadm monitor
+* sudo udevadm info -a -n /dev/bus/usb/<bus>/<device>
+* udev rule dla dostępu bez roota: 
+    SUBSYSTEM=="usb", \
+    ATTRS{idVendor}=="cafe", \
+    ATTRS{idProduct}=="4013", \
+    MODE="0666", \
+    TAG+="uaccess"
 
 ## Plan:
 1. libUsb na komputerze & tinyUsb na urządzeniu
