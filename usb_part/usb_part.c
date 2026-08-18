@@ -118,6 +118,7 @@ void tud_vendor_int_rx_cb(uint8_t itf, const uint8_t *buffer, uint32_t bufsize)
 {
     printf("tud_vendor_int_rx_cb\n");
 
+    uint32_t bufferSizeLeft = bufsize;
     if (bufsize == 0)
     {
         printf("tud_vendor_rx_cb: bufsize == 0\n");
@@ -128,17 +129,25 @@ void tud_vendor_int_rx_cb(uint8_t itf, const uint8_t *buffer, uint32_t bufsize)
     }
     else
     {
-        printf("tud_vendor_rx_cb: itf: %d: ", itf);
-            for (int i = 0; i < bufsize; i++)
-            {
-                printf("%c", buffer[i]);
-            }
-            printf(" (");
-            for (int i = 0; i < bufsize; i++)
-            {
-                printf("0x%x, ", buffer[i]);
-            }
-            printf(")\n");
+        uint8_t action = buffer[0];
+        bufferSizeLeft--;
+        if (bufferSizeLeft > 0 && action == ACTION_GET_VOLUME)
+        {
+            uint8_t volume = buffer[1];
+            
+            printf("Received volume: %d\n", volume);
+        }
+        // printf("tud_vendor_rx_cb: itf: %d: ", itf);
+        //     for (int i = 0; i < bufsize; i++)
+        //     {
+        //         printf("%c", buffer[i]);
+        //     }
+        //     printf(" (");
+        //     for (int i = 0; i < bufsize; i++)
+        //     {
+        //         printf("0x%x, ", buffer[i]);
+        //     }
+        //     printf(")\n");
     }
 
     tud_vendor_n_int_read_xfer(itf);

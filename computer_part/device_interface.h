@@ -13,7 +13,7 @@ typedef void (*ActionCallback)(uint32_t action, void* userData);
 // callback - called when device generated an event
 // userData - passed to callback
 // closing  - post this semaphore to close connection to device and return.
-int driverInit(ActionCallback callback, void* userData, sem_t* closing);
+int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* deviceReady);
 void volumeChanged(uint8_t volumePercent);
 // void setActionCallback(ActionCallback callback);
 // void setActionCallback(ActionCallback, void* userData);

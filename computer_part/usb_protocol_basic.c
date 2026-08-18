@@ -342,7 +342,7 @@ void releaseResources(InitChecklist checklist
     printf("[releaseResources] end\n");
 }
 
-int driverInit(ActionCallback callback, void* userData, sem_t* closing)
+int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* deviceReady)
 {
     if (!callback || !userData || !closing)
     {
@@ -500,6 +500,10 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
 
         printf("Any key to close application\n");
         // char theGuy = getchar();
+        if (deviceReady != NULL)
+        {
+            sem_post(deviceReady);
+        }
         sem_wait(closing);
         printf ("[sem posted]\n");
 
@@ -577,6 +581,8 @@ void volumeChanged(uint8_t volumePercent)
         __programState, 
         INTERRUPT_TIMEOUT_MS);
 
+    // TODO: If there are some difficulties, just set the value and signal it as ready.
+    //       and let the other thread submit the thread.
     int err = libusb_submit_transfer(__programState->outTransfer);
     if (err)
     {

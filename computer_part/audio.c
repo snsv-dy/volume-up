@@ -110,8 +110,11 @@ typedef struct {
     pthread_mutex_t operationsMutex;
 
     ItcStruct* itc;
+    // device thread variables.
     sem_t deviceThreadSem;
+    sem_t* waitForDeviceThread;
     int running; // Na razie tylko w wątku urządzenia.
+    //
 } OperationState;
 
 //
@@ -251,7 +254,7 @@ void* inputThread(void* arg)
     printf("Trying to connect to device\n");
     const int maxRetries = 2;
     int nRetries = 0;
-    while (operationState->running && nRetries++ < maxRetries && driverInit(actionFromDeviceCallback, arg, &operationState->deviceThreadSem))
+    while (operationState->running && nRetries++ < maxRetries && driverInit(actionFromDeviceCallback, arg, &operationState->deviceThreadSem, operationState->waitForDeviceThread))
     {
         if (!operationState->running)
         {
@@ -264,16 +267,18 @@ void* inputThread(void* arg)
     // }
 }
 
-void initInputThread(pthread_t* thread, OperationState* operationState)
+void initInputThread(pthread_t* thread, OperationState* operationState, uint32_t waitForStart)
 {
     assert(thread && operationState);
     // TODO:
     // TODO: Gracefully destroy this shit after exit.
+    sem_t waitForDeviceThread;
     if (
            sem_init(&(operationState->itc->actionReady), 0, 0)
         || sem_init(&(operationState->itc->actionConsumed), 0, 1)
         || pthread_mutex_init(&operationState->operationsMutex, NULL)
         || sem_init(&(operationState->deviceThreadSem), 0, 0)
+        || (waitForStart && sem_init(&waitForDeviceThread, 0, 0))
     )
     {
         printf("Failed to initialize itc\n");
@@ -281,12 +286,22 @@ void initInputThread(pthread_t* thread, OperationState* operationState)
         return;
     }
     operationState->running = 1;
+
+    if (waitForStart)
+    {
+        operationState->waitForDeviceThread = &waitForDeviceThread;
+    }
     
 
     if (pthread_create(thread, NULL, inputThread, (void*)operationState) != 0)
     {
         printf("Failed to create input thread\n");
     }
+    else if (waitForStart)
+    {
+        sem_wait(operationState->waitForDeviceThread);
+    }
+    sem_destroy(operationState->waitForDeviceThread);
 }
 
 void setAction(OperationState* operationState, int action)
@@ -365,7 +380,7 @@ int main(int argc, char *argv[]) {
 
     initInterruptSignal();
 
-    initInputThread(&inputThread, &operationState);
+    initInputThread(&inputThread, &operationState, 1);
     printf("input thread inited\n");
 
     if (pulseaudioMainLoop(&operationState) < 0) {
@@ -435,6 +450,7 @@ void sink_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
     }
     operationState->defaultSink.set = 1;
     printf("[Sink updated] sink[%d] vol: %2f\n", operationState->defaultSink.index, (double)pa_cvolume_avg(&operationState->defaultSink.cvolume) / PA_VOLUME_NORM * 100.0);
+    volumeChanged((uint8_t)(pa_cvolume_avg(&(i->volume)) * 100 / PA_VOLUME_NORM));
     
     nextState(operationState);
 }
