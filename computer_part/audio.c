@@ -93,6 +93,11 @@ typedef struct
 } OperationParamsCb;
 
 typedef struct {
+    // pa variables;
+    pa_context *pa_ctx;
+    pa_mainloop *pa_mainloop;
+    pa_context_state_t pa_state;
+    //
     int state;
     int initialized;
     char defaultSinkName[SMALL_STR_LEN];
@@ -128,6 +133,7 @@ void operationsCbTests();
 //  TODO: Later
 //
 
+void nextState(OperationState* operationState);
 void printSinkInput(SinkInputInfo* info);
 void pa_state_cb(pa_context *c, void *userdata);
 void pa_sinklist_cb(pa_context *c, const pa_sink_info *l, int eol, void *userdata);
@@ -287,6 +293,8 @@ void setAction(OperationState* operationState, int action)
 {
 
     QueueOperation(operationState, 0, 0, 0, action);
+    // TODO: !!!
+    nextState(operationState);
     // FetchOperation(operationState);
 }
 
@@ -322,6 +330,7 @@ void interruptSignalHandler()
     sem_post(&__globalOperationState->deviceThreadSem);
     // Zamykanie wątku pulseaudio.
     QueueOperation(__globalOperationState, 0, 0, 0, ACTION_SHUT_DOWN);
+    nextState(__globalOperationState);
 
     printf("[ctrl+c] Finished\n");
 }
@@ -374,24 +383,28 @@ int main(int argc, char *argv[]) {
 
 void server_info_cb(pa_context *c, const pa_server_info*i, void *userdata)
 {
-    OperationState* os = userdata;
+    OperationState* operationState = userdata;
     if (userdata)
     {
-        strncpy(os->defaultSinkName, i->default_sink_name, SMALL_STR_LEN - 1);
+        strncpy(operationState->defaultSinkName, i->default_sink_name, SMALL_STR_LEN - 1);
     }
+    nextState(operationState);
 }
 
 
 void sink_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
 {
+    OperationState* operationState = (OperationState*)userdata;
     if (eol < 0) {
         printf("Failed to get sink information: %s", pa_strerror(pa_context_errno(c)));
+        nextState(operationState);
         return;
     }
 
     if (eol)
     {
         printf("eol\n");
+        nextState(operationState);
         return;
     }
     else
@@ -399,7 +412,6 @@ void sink_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
         printf("sink\n");
     }
 
-    OperationState* os = (OperationState*)userdata;
     if (i == NULL)
     {
         printf("Sink with that name is null, eol: %d\n", eol);
@@ -408,28 +420,33 @@ void sink_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
 
     // Hanlde only default sink for now.
     // TODO: Handle default sink change.
-    if (os->defaultSinkName[0] && strcmp(i->name, os->defaultSinkName))
+    if (operationState->defaultSinkName[0] && strcmp(i->name, operationState->defaultSinkName))
     {
+        // nextState(operationState);
         return;
     }
 
-    os->defaultSink.index = i->index;
-    os->defaultSink.volume = pa_cvolume_avg(&(i->volume));
-    os->defaultSink.cvolume.channels = i->volume.channels;
+    operationState->defaultSink.index = i->index;
+    operationState->defaultSink.volume = pa_cvolume_avg(&(i->volume));
+    operationState->defaultSink.cvolume.channels = i->volume.channels;
     for (int index = 0; index < i->volume.channels; index++)
     {
-        os->defaultSink.cvolume.values[index] = i->volume.values[index];
+        operationState->defaultSink.cvolume.values[index] = i->volume.values[index];
     }
-    os->defaultSink.set = 1;
-    printf("[Sink updated] sink[%d] vol: %2f\n", os->defaultSink.index, (double)pa_cvolume_avg(&os->defaultSink.cvolume) / PA_VOLUME_NORM * 100.0);
+    operationState->defaultSink.set = 1;
+    printf("[Sink updated] sink[%d] vol: %2f\n", operationState->defaultSink.index, (double)pa_cvolume_avg(&operationState->defaultSink.cvolume) / PA_VOLUME_NORM * 100.0);
+    
+    nextState(operationState);
 }
 
 void set_volume_success_cb(pa_context *c, int success, void *userdata)
 {
+    OperationState* operationState = userdata;
     if (!success)
     {
         printf("No success\n");
     }
+    nextState(operationState);
 }
 
 void setVolume(pa_cvolume* cvolume, int action)
@@ -514,31 +531,31 @@ int isOperation(pa_operation** pa_op)
 
 
 
-int NextState(OperationState* s)
-{
-    // 1. Request operation() (ethier by subscription event, or user input)
-    // 2. Store operation info/steps in OperationState.operation
-    // 3. In callback call OperationComplete() to move to the next step, or finish.
-    /*
-        for example:
+// int NextState(OperationState* s)
+// {
+//     // 1. Request operation() (ethier by subscription event, or user input)
+//     // 2. Store operation info/steps in OperationState.operation
+//     // 3. In callback call OperationComplete() to move to the next step, or finish.
+//     /*
+//         for example:
 
-        RequestOperation(os, INC_DEF_SINK_BY_5);
-        1. if !os.operation.active -> os.operation.active = 1;
-           else drop it (later queue operations)
-           os.operation.type = INC_DEF_SINK_BY_5;
-           OperationComplete(os)
-        2. from OperationComplete()
-           switch (os.operation.type)
-           case INC_DEF_SINK_BY_5:
-           if !os.defaultSink.name -> os.operation.state = GET_SERVER
-           else if !os.defaultSink.name -> ... <- we get name
-           else if !os.defaultSink.id -> os.operation.state = GET_SINK_INFO <- we get info (id, volume)
-           else os.operation.state = GET_SINK_VOL
-        3. State read by mainloop, and doing shit.
-    */
+//         RequestOperation(os, INC_DEF_SINK_BY_5);
+//         1. if !os.operation.active -> os.operation.active = 1;
+//            else drop it (later queue operations)
+//            os.operation.type = INC_DEF_SINK_BY_5;
+//            OperationComplete(os)
+//         2. from OperationComplete()
+//            switch (os.operation.type)
+//            case INC_DEF_SINK_BY_5:
+//            if !os.defaultSink.name -> os.operation.state = GET_SERVER
+//            else if !os.defaultSink.name -> ... <- we get name
+//            else if !os.defaultSink.id -> os.operation.state = GET_SINK_INFO <- we get info (id, volume)
+//            else os.operation.state = GET_SINK_VOL
+//         3. State read by mainloop, and doing shit.
+//     */
 
-    return STATE_INCORRECT;
-}
+//     return STATE_INCORRECT;
+// }
 
 void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t idx, void *userdata)
 {
@@ -548,17 +565,17 @@ void subscribe_cb(pa_context *c, pa_subscription_event_type_t t, uint32_t idx, v
     int eventType  = t & PA_SUBSCRIPTION_EVENT_TYPE_MASK;
     
     printf("[subscribe] obj: %2x, event: %2x, id: %d\n", objectType, eventType, idx);
-    OperationState* operation = (OperationState *)userdata;
+    OperationState* operationState = (OperationState *)userdata;
     if (   (objectType == PA_SUBSCRIPTION_EVENT_SINK && eventType == PA_SUBSCRIPTION_EVENT_CHANGE)
         || (objectType == PA_SUBSCRIPTION_EVENT_SINK_INPUT))
     {
-        QueueOperation(operation, idx, objectType, eventType, ACTION_UPDATE_OBJ);
+        QueueOperation(operationState, idx, objectType, eventType, ACTION_UPDATE_OBJ);
     }
     // if (operation->state == STATE_INITALIZED)
     // {
     //     operation->;
     // }
-    // prolly pass to userdata and make request in mainloop. :/
+    nextState(operationState);
 }
 
 void context_success_cb(pa_context *c, int success, void *userdata)
@@ -567,8 +584,8 @@ void context_success_cb(pa_context *c, int success, void *userdata)
     operationState->initialized = success ? 1 : -1;
     // *(int *)userdata = success;
     printf("Set subscribe success: %d\n", success);
+    nextState(operationState);
 }
-
 
 void QueueOperation(OperationState* operationState, uint32_t id, pa_subscription_event_type_t objectType, pa_subscription_event_type_t eventType, int action)
 {
@@ -605,12 +622,13 @@ void FetchOperation(OperationState* operationState)
     // TODO: Debug with device attached. (sudo or add device to udev)
     pthread_mutex_lock(&operationState->operationsMutex);
     OperationParams* operation = operations_cb_front(&operationState->operations);
-    if (operation != NULL && operationState->state == STATE_INITIALIZED && operationState->itc->action == ACTION_INCORRECT)
+    if (operation != NULL && operationState->state != STATE_INCORRECT && operationState->itc->action == ACTION_INCORRECT)
     {
         operationState->itc->action = operation->action;
+        // operations_cb_pop(&operationState->operations);
+
         pa_mainloop_wakeup(operationState->itc->mainloop);
         printf("waking Mainloop\n");
-        // operations_cb_pop(&operationState->operations);
     }
     else
     {
@@ -625,7 +643,7 @@ int pulseaudioMainLoop(OperationState* operationState) {
     // Define our pulse audio loop and connection variables
     pa_mainloop *pa_ml;
     pa_mainloop_api *pa_mlapi;
-    pa_operation *pa_op = NULL;
+    // pa_operation *pa_op = NULL;
     pa_context *pa_ctx;
 
     // int state = STATE_INIT;
@@ -653,9 +671,13 @@ int pulseaudioMainLoop(OperationState* operationState) {
     // modify the variable to 1 so we know when we have a connection and it's
     // ready.
     // If there's an error, the callback will set pa_ready to 2
-    pa_context_set_state_callback(pa_ctx, pa_state_cb, &pa_ready);
+    pa_context_set_state_callback(pa_ctx, pa_state_cb, operationState);
     pa_context_set_subscribe_callback(pa_ctx, subscribe_cb, operationState);
 
+    operationState->pa_ctx = pa_ctx;
+    operationState->pa_mainloop = pa_ml;
+
+    pa_mainloop_wakeup(pa_ml);
     // Now we'll enter into an infinite loop until we get the data we receive
     // or if there's an error
     // pa_mainloop_run(pa_ml);
@@ -663,76 +685,98 @@ int pulseaudioMainLoop(OperationState* operationState) {
     int first = 1;
     printf("[audio.c]begin loop\n");
     int action = ACTION_INCORRECT;
-    for (;;) {
+    // for (;;) {
 
         // Iterate the main loop and go again.  The second argument is whether
         // or not the iteration should block until something is ready to be
         // done.  Set it to zero for non-blocking.
-        if (!first)
-        {
-            pa_mainloop_iterate(pa_ml, 1, NULL);
-        }
-        first = 0;
-        printf("[audio.c]iterate\n");
+        // if (!first)
+        // {
+        //     pa_mainloop_iterate(pa_ml, 1, NULL);
+        // }
+        // first = 0;
+        // printf("[audio.c]iterate\n");
 
         // We can't do anything until PA is ready, so just iterate the mainloop
         // and continue
-        if (pa_ready == 0) {
-            // pa_mainloop_iterate(pa_ml, 1, NULL);
-            continue;
-        }
-        // We couldn't get a connection to the server, so exit out
-        if (pa_ready == 2) {
-            pa_context_disconnect(pa_ctx);
-            pa_context_unref(pa_ctx);
-            pa_mainloop_free(pa_ml);
-            return -1;
-        }
+        // if (pa_ready == 0) {
+        //     // pa_mainloop_iterate(pa_ml, 1, NULL);
+        //     continue;
+        // }
+        // // We couldn't get a connection to the server, so exit out
+        // if (pa_ready == 2) {
+        //     pa_context_disconnect(pa_ctx);
+        //     pa_context_unref(pa_ctx);
+        //     pa_mainloop_free(pa_ml);
+        //     return -1;
+        // }
 
-        if ((operationState->state != STATE_INCORRECT) && action == ACTION_INCORRECT)
-        {
-            // printf("Waiting for action\n");
-            action = WaitForAction(operationState->itc);
-            if (action == ACTION_INCORRECT)
-            {
-                // printf("action incorrect\n");
-                continue;
-            }
-            // printf("action aquired: %x\n", action);
-        }
-        
+        // if ((operationState->state != STATE_INCORRECT) && action == ACTION_INCORRECT)
+        // {
+        //     // printf("Waiting for action\n");
+        //     action = WaitForAction(operationState->itc);
+        //     if (action == ACTION_INCORRECT)
+        //     {
+        //         // printf("action incorrect\n");
+        //         continue;
+        //     }
+        //     // printf("action aquired: %x\n", action);
+        // }
+    printf("[audio.c] mainloop run\n");
+    int retval = 0;
+    pa_mainloop_run(pa_ml, &retval);
+
+    printf("[audio.c] mainloop finished\n");
+    pa_context_disconnect(pa_ctx);
+    pa_context_unref(pa_ctx);
+    pa_mainloop_free(pa_ml);
+
+    return retval;
+}
+
+void nextState(OperationState* operationState)
+{
+    printf("[nextState]\n");
+    pa_operation *pa_op = NULL;
         // printf("got state: %d\n", operationState->state);
+
+    // Do this once, unless specially requested. (set volume and update objects states)
+    for (int nLoops = 0; nLoops < 1; nLoops++)
+    {
         switch (operationState->state) {
             case STATE_INCORRECT: // Need to set up stuff
-                if (isOperation(&pa_op))
-                {
-                    break;
-                }
+                // if (isOperation(&pa_op))
+                // {
+                //     break;
+                // }
                 
                 // Setting subscription.
                 if (!operationState->initialized)
                 {
                     // initialize stuff
                     pa_op = pa_context_subscribe(
-                        pa_ctx, 
+                        operationState->pa_ctx, 
                         PA_SUBSCRIPTION_MASK_SINK_INPUT
                         | PA_SUBSCRIPTION_MASK_SINK,
                         context_success_cb,
                         (void*)operationState);
+                    pa_operation_unref(pa_op);
                     break;
                 }
 
                 // Getting default sink info
                 if (operationState->defaultSinkName[0] == '\0')
                 {
-                    pa_op = pa_context_get_server_info(pa_ctx, server_info_cb, (void *)operationState);
+                    pa_op = pa_context_get_server_info(operationState->pa_ctx, server_info_cb, (void *)operationState);
+                    pa_operation_unref(pa_op);
                     break;
                 }
 
                 if (!operationState->defaultSink.set)
                 {
                     printf("Default sink name: '%s'\n", operationState->defaultSinkName);
-                    pa_op = pa_context_get_sink_info_by_name(pa_ctx, operationState->defaultSinkName, sink_info_cb, (void *)operationState);
+                    pa_op = pa_context_get_sink_info_by_name(operationState->pa_ctx, operationState->defaultSinkName, sink_info_cb, (void *)operationState);
+                    pa_operation_unref(pa_op);
                     break;
                 }
 
@@ -742,7 +786,7 @@ int pulseaudioMainLoop(OperationState* operationState) {
                 // TODO: To następne
                 // TODO: Get all sink inputs.
                 pa_op = pa_context_get_sink_input_info_list(
-                    pa_ctx,
+                    operationState->pa_ctx,
                     sink_input_info_cb,
                     operationState
                 );
@@ -757,23 +801,30 @@ int pulseaudioMainLoop(OperationState* operationState) {
                 operationState->state = STATE_INITIALIZED;
                 break;
             case STATE_INITIALIZED:
-                if (isOperation(&pa_op))
+                // if (isOperation(&pa_op))
+                // {
+                //     break;
+                // }
+                // TODO: Get action from first element of queue maybe?
+                //       And after setting request to the pa, the operation is finished.
+                if (operationState->itc->action == ACTION_INCORRECT)
                 {
-                    break;
+                    FetchOperation(operationState);
                 }
 
-                if (action & ACTION_VOLUME_SET_MASK)
+                if (operationState->itc->action & ACTION_VOLUME_SET_MASK)
                 {
                     if (operationState->defaultSink.set)
                     {
                         printf("Default sink index: %d\n", operationState->defaultSink.index);
-                        setVolume(&operationState->defaultSink.cvolume, action);
+                        setVolume(&operationState->defaultSink.cvolume, operationState->itc->action);
                         pa_op = pa_context_set_sink_volume_by_index(
-                            pa_ctx, 
+                            operationState->pa_ctx, 
                             operationState->defaultSink.index, 
                             &operationState->defaultSink.cvolume, 
                             set_volume_success_cb, 
                             operationState);
+                        pa_operation_unref(pa_op);
                         operationState->state = STATE_SETTING_VOLUME;
                         break;
                     }
@@ -783,7 +834,7 @@ int pulseaudioMainLoop(OperationState* operationState) {
                         // state -> INCORRECT?/UPDATING_OBJECTS
                     }
                 }
-                else if (action == ACTION_UPDATE_OBJ)
+                else if (operationState->itc->action == ACTION_UPDATE_OBJ)
                 {
                     pthread_mutex_lock(&operationState->operationsMutex);
                     OperationParams* params = operations_cb_front(&operationState->operations);
@@ -801,11 +852,12 @@ int pulseaudioMainLoop(OperationState* operationState) {
                                 ||  params->eventType == PA_SUBSCRIPTION_EVENT_CHANGE)
                             {
                                 pa_op = pa_context_get_sink_info_by_index(
-                                    pa_ctx,
+                                    operationState->pa_ctx,
                                     params->objIndex,
                                     sink_info_cb,
                                     operationState
                                 );
+                                pa_operation_unref(pa_op);
                             }
                             break;
                         case PA_SUBSCRIPTION_EVENT_SINK_INPUT:
@@ -813,11 +865,12 @@ int pulseaudioMainLoop(OperationState* operationState) {
                                 ||  params->eventType == PA_SUBSCRIPTION_EVENT_CHANGE)
                             {
                                 pa_op = pa_context_get_sink_input_info(
-                                    pa_ctx,
+                                    operationState->pa_ctx,
                                     params->objIndex,
                                     sink_input_info_cb,
                                     operationState
                                 );
+                                pa_operation_unref(pa_op);
                             }
                             else
                             {
@@ -833,24 +886,22 @@ int pulseaudioMainLoop(OperationState* operationState) {
                     pthread_mutex_unlock(&operationState->operationsMutex);
                     break;
                 }
-                else if (action == ACTION_SHUT_DOWN)
+                else if (operationState->itc->action == ACTION_SHUT_DOWN)
                 {
-                    pa_context_disconnect(pa_ctx);
-                    pa_context_unref(pa_ctx);
-                    pa_mainloop_free(pa_ml);
-                    return 0;
-                }
-                else if (action == ACTION_INCORRECT)
-                {
-                    FetchOperation(operationState);
+                    // pa_context_disconnect(pa_ctx);
+                    // pa_context_unref(pa_ctx);
+                    // pa_mainloop_free(pa_ml);
+                    pa_mainloop_quit(operationState->pa_mainloop, 1);
+                    return;
                 }
             break;
             case STATE_UPDATING_OBJECTS:
             case STATE_SETTING_VOLUME:
-                    if (isOperation(&pa_op))
-                    {
-                        break;
-                    }
+                printf("[nextState] operation completed\n");
+                    // if (isOperation(&pa_op))
+                    // {
+                    //     break;
+                    // }
                     // if (action == ACTION_UPDATE_OBJ)
                     // {
                         pthread_mutex_lock(&operationState->operationsMutex);
@@ -867,19 +918,20 @@ int pulseaudioMainLoop(OperationState* operationState) {
                     operationState->params.objIndex = 0;
                     operationState->params.objType = 0;
                     operationState->state = STATE_INITIALIZED;
-                    action = ACTION_INCORRECT;
+                    operationState->itc->action = ACTION_INCORRECT;
                     OperationCompleted(operationState->itc);
                     FetchOperation(operationState);
+                    nLoops--; // Go to the Initialized state and check if there is something to do.
                 break;
             case STATE_SHUTTING_DOWN:
-                if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
-                    pa_operation_unref(pa_op);
-                    pa_context_disconnect(pa_ctx);
-                    pa_context_unref(pa_ctx);
-                    pa_mainloop_free(pa_ml);
-                    return 0;
-                }
-                break;
+                // if (pa_operation_get_state(pa_op) == PA_OPERATION_DONE) {
+                //     pa_operation_unref(pa_op);
+                //     pa_context_disconnect(pa_ctx);
+                //     pa_context_unref(pa_ctx);
+                //     pa_mainloop_free(pa_ml);
+                //     return 0;
+                // }
+                // break;
 
             default:
                 // We should never see this state
@@ -931,6 +983,7 @@ void sink_input_info_cb(pa_context *c, const pa_sink_input_info *info, int eol, 
     SinkInputInfo* sinkInputList = operationState->sinkInputs;
     
     if (eol > 0) {
+        nextState(operationState);
         return;
     }
 
@@ -940,6 +993,7 @@ void sink_input_info_cb(pa_context *c, const pa_sink_input_info *info, int eol, 
         // probably sink input was removed somewhere between 
         // requesting information about it.
         printf("[sink input info cb] eol < 0\n");
+        nextState(operationState);
         return;
     }
 
@@ -948,6 +1002,7 @@ void sink_input_info_cb(pa_context *c, const pa_sink_input_info *info, int eol, 
     {
         // When not initialized. It might just listing them.
         printf("[SinkInput cb] No operation, idk what to do. id: %d\n", info->index);
+        nextState(operationState);
         return;
     }
 
@@ -1005,31 +1060,38 @@ void sink_input_info_cb(pa_context *c, const pa_sink_input_info *info, int eol, 
         sink->initialized = 1;
         printSinkInput(sink);
     }
+
+    nextState(operationState);
 }
 
 // This callback gets called when our context changes state.  We really only
 // care about when it's ready or if it has failed
 void pa_state_cb(pa_context *c, void *userdata) {
-        pa_context_state_t state;
-        int *pa_ready = userdata;
+    // pa_context_state_t state;
+    OperationState* operationState = userdata;
+    // int *pa_ready = userdata;
 
-        state = pa_context_get_state(c);
-        switch  (state) {
-                // There are just here for reference
-                case PA_CONTEXT_UNCONNECTED:
-                case PA_CONTEXT_CONNECTING:
-                case PA_CONTEXT_AUTHORIZING:
-                case PA_CONTEXT_SETTING_NAME:
-                default:
-                        break;
-                case PA_CONTEXT_FAILED:
-                case PA_CONTEXT_TERMINATED:
-                        *pa_ready = 2;
-                        break;
-                case PA_CONTEXT_READY:
-                        *pa_ready = 1;
-                        break;
-        }
+    operationState->pa_state = pa_context_get_state(c);
+    switch  (operationState->pa_state) {
+            // There are just here for reference
+            case PA_CONTEXT_UNCONNECTED:
+            case PA_CONTEXT_CONNECTING:
+            case PA_CONTEXT_AUTHORIZING:
+            case PA_CONTEXT_SETTING_NAME:
+            default:
+                    break;
+            case PA_CONTEXT_FAILED:
+            case PA_CONTEXT_TERMINATED:
+                    // TODO: Quit the pa main loop;
+                    pa_mainloop_quit(operationState->pa_mainloop, 1);
+                    break;
+            case PA_CONTEXT_READY:
+                // Start executing requests.
+                nextState(operationState);
+                    // *pa_ready = 1;
+                    // operationState->pa_ready
+                    return;
+    }
 }
 
 // pa_mainloop will call this function when it's ready to tell us about a sink.
