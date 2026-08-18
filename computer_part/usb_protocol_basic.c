@@ -226,6 +226,65 @@ int main() {
 }
 #endif
 
+int initEndpointAdresses(ProgramState* programState, struct libusb_config_descriptor* activeConfig)
+{
+    int nFound = 0;
+    for (int i = 0; i < activeConfig->bNumInterfaces; i++)
+    {
+        struct libusb_interface* interface = (struct libusb_interface*)&activeConfig->interface[i];
+
+        // struct libusb_interface_descriptor* interfaceDescriptor = (struct libusb_interface_descriptor*)&activeConfig->interface[i];
+        printf("Interface %d(%d): \n", i, 0);
+        printf("num_altsetting: %d\n", interface->num_altsetting);
+        if (interface->num_altsetting == 0)
+        {
+            continue;
+        }
+        const struct libusb_interface_descriptor* interfaceDescriptor = &interface->altsetting[0];
+        
+        
+        // printf("bLength: 0x%x\n", interfaceDescriptor->bLength);
+        // printf("bDescriptorType: 0x%x\n", interfaceDescriptor->bDescriptorType);
+        // printf("bInterfaceNumber: 0x%x\n", interfaceDescriptor->bInterfaceNumber);
+        // printf("bAlternateSetting: 0x%x\n", interfaceDescriptor->bAlternateSetting);
+        // printf("bNumEndpoints: %d\n", interfaceDescriptor->bNumEndpoints);
+        // printf("bInterfaceClass: 0x%x\n", interfaceDescriptor->bInterfaceClass);
+        // printf("bInterfaceSubClass: 0x%x\n", interfaceDescriptor->bInterfaceSubClass);
+        // printf("bInterfaceProtocol: 0x%x\n", interfaceDescriptor->bInterfaceProtocol);
+        // printf("iInterface: 0x%x\n", interfaceDescriptor->iInterface);
+        // printf("extra_length: %u\n", interfaceDescriptor->extra_length);
+        // printf("--------------\n");
+        for (int j = 0; j < interfaceDescriptor->bNumEndpoints; j++)
+        {
+            const struct libusb_endpoint_descriptor *endpoint = (const struct libusb_endpoint_descriptor *)&interfaceDescriptor->endpoint[j];
+            // printf("Endpoint %d\n", j);
+            // printf("bLength: 0x%x\n", endpoint->bLength);
+            // printf("bDescriptorType: 0x%x\n", endpoint->bDescriptorType);
+            // printf("bEndpointAddress: 0x%x\n", endpoint->bEndpointAddress);
+            // printf("bmAttributes: 0x%x\n", endpoint->bmAttributes);
+            // printf("wMaxPacketSize: %d\n", endpoint->wMaxPacketSize);
+            // printf("bInterval: %d\n", endpoint->bInterval);
+            // printf("bRefresh: 0x%x\n", endpoint->bRefresh);
+            // printf("bSynchAddress: 0x%x\n", endpoint->bSynchAddress);
+            // printf("--------------\n");
+
+            if (i == 0 && (endpoint->bEndpointAddress & 0x80)) // The in endpoint.
+            {
+                programState->inEndpointAddress = endpoint->bEndpointAddress;
+                nFound++;
+            }
+            else if ( j < 2)// out endpoint
+            {
+                programState->outEndpointAddress = endpoint->bEndpointAddress;
+                nFound++;
+            }
+        }
+        // printf("==============\n");
+    }
+
+    return nFound;
+}
+
 int driverInit(ActionCallback callback, void* userData, sem_t* closing)
 {
     if (!callback || !userData || !closing)
@@ -268,6 +327,16 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
 
     if (pico)
     {
+        // Ref device, żeby nie zostało usunięte przez libusb_free_device_list.
+        // Można by też pierw otworzyć, a potem zwolnić listę, ale na razie to wydaje mi się schludniejsze.
+        libusb_ref_device(pico);
+    }
+
+    printf("libusb_free_device_list\n");
+    libusb_free_device_list(devices, 1);
+
+    if (pico)
+    {
         struct libusb_config_descriptor* activeConfig;
         err = libusb_get_active_config_descriptor(pico, &activeConfig);
         if (err)
@@ -277,76 +346,33 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
         }
 
         printf("activeConfig->bNumInterfaces: %d\n", activeConfig->bNumInterfaces);
-        for (int i = 0; i < activeConfig->bNumInterfaces; i++)
-        {
-            struct libusb_interface* interface = (struct libusb_interface*)&activeConfig->interface[i];
-
-            // struct libusb_interface_descriptor* interfaceDescriptor = (struct libusb_interface_descriptor*)&activeConfig->interface[i];
-            printf("Interface %d(%d): \n", i, 0);
-            printf("num_altsetting: %d\n", interface->num_altsetting);
-            if (interface->num_altsetting == 0)
-            {
-                continue;
-            }
-            const struct libusb_interface_descriptor* interfaceDescriptor = &interface->altsetting[0];
-            
-            
-            // printf("bLength: 0x%x\n", interfaceDescriptor->bLength);
-            // printf("bDescriptorType: 0x%x\n", interfaceDescriptor->bDescriptorType);
-            // printf("bInterfaceNumber: 0x%x\n", interfaceDescriptor->bInterfaceNumber);
-            // printf("bAlternateSetting: 0x%x\n", interfaceDescriptor->bAlternateSetting);
-            // printf("bNumEndpoints: %d\n", interfaceDescriptor->bNumEndpoints);
-            // printf("bInterfaceClass: 0x%x\n", interfaceDescriptor->bInterfaceClass);
-            // printf("bInterfaceSubClass: 0x%x\n", interfaceDescriptor->bInterfaceSubClass);
-            // printf("bInterfaceProtocol: 0x%x\n", interfaceDescriptor->bInterfaceProtocol);
-            // printf("iInterface: 0x%x\n", interfaceDescriptor->iInterface);
-            // printf("extra_length: %u\n", interfaceDescriptor->extra_length);
-            // printf("--------------\n");
-            for (int j = 0; j < interfaceDescriptor->bNumEndpoints; j++)
-            {
-                const struct libusb_endpoint_descriptor *endpoint = (const struct libusb_endpoint_descriptor *)&interfaceDescriptor->endpoint[j];
-                // printf("Endpoint %d\n", j);
-                // printf("bLength: 0x%x\n", endpoint->bLength);
-                // printf("bDescriptorType: 0x%x\n", endpoint->bDescriptorType);
-                // printf("bEndpointAddress: 0x%x\n", endpoint->bEndpointAddress);
-                // printf("bmAttributes: 0x%x\n", endpoint->bmAttributes);
-                // printf("wMaxPacketSize: %d\n", endpoint->wMaxPacketSize);
-                // printf("bInterval: %d\n", endpoint->bInterval);
-                // printf("bRefresh: 0x%x\n", endpoint->bRefresh);
-                // printf("bSynchAddress: 0x%x\n", endpoint->bSynchAddress);
-                // printf("--------------\n");
-
-                if (i == 0 && (endpoint->bEndpointAddress & 0x80)) // The in endpoint.
-                {
-                    programState.inEndpointAddress = endpoint->bEndpointAddress;
-                }
-                else if ( j < 2)// out endpoint
-                {
-                    programState.outEndpointAddress = endpoint->bEndpointAddress;
-                }
-            }
-            // printf("==============\n");
-        }
+        initEndpointAdresses(&programState, activeConfig);
+        
 
         libusb_device_handle* handle;
         err = libusb_open(pico, &handle);
         if (err)
         {
-            printf("err open: %s\n", libusb_error_name(err));
+            printf("err libusb_open: %s\n", libusb_error_name(err));
+            libusb_unref_device(pico);
             return err;
         }
         programState.deviceHandle = handle;
         err = libusb_set_auto_detach_kernel_driver(handle, 1);
         if (err)
         {
-            printf("auto detach error: %s\n", libusb_error_name(err));
+            printf("libusb_set_auto_detach_kernel_driver error: %s\n", libusb_error_name(err));
+            libusb_close(pico);
+            libusb_unref_device(pico);
             return err;
         }
 
         err = libusb_claim_interface(handle, KEYBOARD_INTERFACE);
         if (err)
         {
-            printf("auto detach error: %s\n", libusb_error_name(err));
+            printf("libusb_claim_interface error: %s\n", libusb_error_name(err));
+            libusb_close(pico);
+            libusb_unref_device(pico);
         }
 
         /*
@@ -367,6 +393,13 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
         if (!programState.inTransfer || !programState.outTransfer)
         {
             printf("!programState.inTransfer || !programState.outTransfer\n");
+            err = libusb_release_interface(handle, KEYBOARD_INTERFACE);
+            if (err)
+            {
+                printf(err, "auto detach error: %s\n", libusb_error_name(err));
+            }
+            libusb_close(pico);
+            libusb_unref_device(pico);
             return -1;
         }
 
@@ -386,7 +419,7 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
         err = libusb_submit_transfer(programState.inTransfer);
         if (err)
         {
-            errx(err, "auto detach error: %s\n", libusb_error_name(err));
+            errx(err, "libusb_submit_transfer error: %s\n", libusb_error_name(err));
         }
         // programState.transferSubmitted = 1;
 
@@ -454,11 +487,10 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
         printf("Nie otwieramy?\n");
     }
 
-    printf("libusb_free_device_list\n");
-    libusb_free_device_list(devices, 1);
-
     printf("libusb_exit\n");
     libusb_exit(NULL);
+
+    return 1;
 }
 
 //
