@@ -285,6 +285,63 @@ int initEndpointAdresses(ProgramState* programState, struct libusb_config_descri
     return nFound;
 }
 
+typedef struct
+{
+    uint8_t deviceFound;
+    uint8_t configDescriptorGot;
+    uint8_t deviceOpened;
+    uint8_t interfaceClaimed;
+    uint8_t transfersAlloced;
+} InitChecklist;
+
+void releaseResources(InitChecklist checklist
+    , libusb_device* device
+    , struct libusb_config_descriptor* activeConfig
+    , libusb_device_handle* handle
+    , ProgramState* programState
+)
+{
+    printf("[releaseResources] begin\n");
+    if (checklist.interfaceClaimed)
+    {
+        printf("[releaseResources] libusb_release_interface\n");
+        int err = libusb_release_interface(handle, KEYBOARD_INTERFACE);
+        if (err)
+        {
+            printf("libusb_release_interface error: %s\n", libusb_error_name(err));
+        }
+    }
+
+    if (checklist.deviceOpened)
+    {
+        printf("[releaseResources] libusb_close\n");
+        libusb_close(handle);
+    }
+
+    if (checklist.transfersAlloced)
+    {
+        printf("[releaseResources] libusb_free_transfer\n");
+        libusb_free_transfer(programState->inTransfer);
+        libusb_free_transfer(programState->outTransfer);
+    }
+
+    if (checklist.configDescriptorGot)
+    {
+        printf("[releaseResources] libusb_free_config_descriptor\n");
+        libusb_free_config_descriptor(activeConfig);
+    }
+
+    if (checklist.deviceFound)
+    {
+        printf("[releaseResources] libusb_unref_device\n");
+        libusb_unref_device(device);
+    }
+
+    libusb_exit(NULL);
+
+    printf("[releaseResources] end\n");
+}
+
 int driverInit(ActionCallback callback, void* userData, sem_t* closing)
 {
     if (!callback || !userData || !closing)
@@ -312,6 +369,9 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
     ssize_t devicesNum = libusb_get_device_list(NULL, &devices);
     struct libusb_device_descriptor lastDescriptor;
 
+    // For destroying;
+    InitChecklist initChecklist = {0};
+
     for (int i = 0; i < devicesNum - 1; i++)
     {
         libusb_get_device_descriptor(devices[i], &lastDescriptor);
@@ -330,40 +390,51 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
         // Ref device, żeby nie zostało usunięte przez libusb_free_device_list.
         // Można by też pierw otworzyć, a potem zwolnić listę, ale na razie to wydaje mi się schludniejsze.
         libusb_ref_device(pico);
+        initChecklist.deviceFound = 1;
     }
 
     printf("libusb_free_device_list\n");
     libusb_free_device_list(devices, 1);
 
+
+
+    struct libusb_config_descriptor* activeConfig;
+    libusb_device_handle* handle;
     if (pico)
     {
-        struct libusb_config_descriptor* activeConfig;
         err = libusb_get_active_config_descriptor(pico, &activeConfig);
         if (err)
         {   
             errx(err, "libusb_get_active_config_descriptor");
+            releaseResources(initChecklist, pico, activeConfig, handle, &programState);
             return err;
         }
+        initChecklist.configDescriptorGot = 1;
 
         printf("activeConfig->bNumInterfaces: %d\n", activeConfig->bNumInterfaces);
-        initEndpointAdresses(&programState, activeConfig);
+        if (!initEndpointAdresses(&programState, activeConfig))
+        {
+            printf("Couldn't find endpoints\n");
+            releaseResources(initChecklist, pico, activeConfig, handle, &programState);
+            return 1;
+        }
         
-
-        libusb_device_handle* handle;
         err = libusb_open(pico, &handle);
         if (err)
         {
             printf("err libusb_open: %s\n", libusb_error_name(err));
-            libusb_unref_device(pico);
+            releaseResources(initChecklist, pico, activeConfig, handle, &programState);
             return err;
         }
         programState.deviceHandle = handle;
+        initChecklist.deviceOpened = 1;
+
         err = libusb_set_auto_detach_kernel_driver(handle, 1);
         if (err)
         {
             printf("libusb_set_auto_detach_kernel_driver error: %s\n", libusb_error_name(err));
-            libusb_close(pico);
-            libusb_unref_device(pico);
+            
+            releaseResources(initChecklist, pico, activeConfig, handle, &programState);
             return err;
         }
 
@@ -371,9 +442,11 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
         if (err)
         {
             printf("libusb_claim_interface error: %s\n", libusb_error_name(err));
-            libusb_close(pico);
-            libusb_unref_device(pico);
+            releaseResources(initChecklist, pico, activeConfig, handle, &programState);
+
+            return err;
         }
+        initChecklist.interfaceClaimed = 1;
 
         /*
         [x]    1. libusb w osobnym wątku.
@@ -393,15 +466,10 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
         if (!programState.inTransfer || !programState.outTransfer)
         {
             printf("!programState.inTransfer || !programState.outTransfer\n");
-            err = libusb_release_interface(handle, KEYBOARD_INTERFACE);
-            if (err)
-            {
-                printf(err, "auto detach error: %s\n", libusb_error_name(err));
-            }
-            libusb_close(pico);
-            libusb_unref_device(pico);
-            return -1;
+            releaseResources(initChecklist, pico, activeConfig, handle, &programState);
+            return 1;
         }
+        initChecklist.transfersAlloced = 1;
 
 
         // volumeChanged(12);
@@ -419,7 +487,9 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
         err = libusb_submit_transfer(programState.inTransfer);
         if (err)
         {
-            errx(err, "libusb_submit_transfer error: %s\n", libusb_error_name(err));
+            printf("libusb_submit_transfer error: %s\n", libusb_error_name(err));
+            releaseResources(initChecklist, pico, activeConfig, handle, &programState);
+            return 1;
         }
         // programState.transferSubmitted = 1;
 
@@ -461,6 +531,8 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
                 errx(err, "auto detach error: %s\n", libusb_error_name(err));
             }
             libusb_close(programState.deviceHandle);
+            initChecklist.interfaceClaimed = 0;
+            initChecklist.deviceOpened = 0;
         }
         pthread_mutex_unlock(&programState.mutexEventThreadRun);
         // printf("[main] mutex exit\n");
@@ -471,16 +543,8 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing)
         //
         // Cleaning up. libusb
         //
-
-        printf("libusb_free_transfer\n");
-        libusb_free_transfer(programState.inTransfer);
-        libusb_free_transfer(programState.outTransfer);
-
-        printf("libusb_free_config_descriptor\n");
-        libusb_free_config_descriptor(activeConfig);
-
-        // close in callback.
-        // libusb_close(handle);
+        releaseResources(initChecklist, pico, activeConfig, handle, &programState);
+        return 0;
     }
     else
     {
