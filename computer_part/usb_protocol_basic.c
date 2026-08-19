@@ -451,11 +451,19 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
         /*
         [x]    1. libusb w osobnym wątku.
                2. callback w przypadku odebrania danych (może być null)
-        [1/2x] 3. czekanie na zakończenie przez użytkownika w mainie (wraz z zamknięciem struktur libusba)
-               3.1 Nie zamyka się poprawnie jeszcze.
-               4. Własny endpoint/interface do odbierania
-               \/ -- To zrób, żeby sprawdzić czy urządzenie cokolwiek odbiera.
-               5. I wysyłania danych? (np. aktualna głośność systemowa)
+        [x]    3. czekanie na zakończenie przez użytkownika w mainie (wraz z zamknięciem struktur libusba)
+        [x]    3.1 Nie zamyka się poprawnie jeszcze.
+        [x]    4. Własny endpoint/interface do odbierania
+        [x]    5. I wysyłania danych? (np. aktualna głośność systemowa)
+               6.0 Może być niezbędne buforowanie out transferów w przypadku errora BUSY.
+                   (albo, buforowanie wiadomości, albo pula zaalokowanych transferów).
+               6. Wyświetlanie na ekranie 
+                  a. głośności głównego sinka
+                  b. głośności ostatniego zmoyfikowanego sink inputu (stanu play/pause)
+                  c. nazwy tego powyżej /\
+                  d. wybranej komendy (później nie będzie potrzebne, jak dodam resztę przycisków)
+               7. Sterownik kernela.
+               8. 2 interfejs hid dla przycisków play/pause mute.
 
         */
           

@@ -61,7 +61,8 @@ pico_enable_stdio_usb(volume-up 0)
 # Add the standard library to the build
 target_link_libraries(volume-up
         pico_stdlib
-        pico_bootsel_via_double_reset)
+        pico_bootsel_via_double_reset
+        hardware_i2c)
 
 
 # Add the standard include files to the build

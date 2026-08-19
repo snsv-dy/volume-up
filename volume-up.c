@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
+#include "hardware/gpio.h"
 
 #include "usb_part/usb_part.h"
 #include "bsp.h"

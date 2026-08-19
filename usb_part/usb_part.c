@@ -300,11 +300,11 @@ void vendor_task()
         bool volDown = isVolumeDown();
         if (volUp)
         {
-            writeBuffer[0] = ACTION_INC5;
+            writeBuffer[0] = ACTION_INC1;
         }
         else if (volDown)
         {
-            writeBuffer[0] = ACTION_DEC5;
+            writeBuffer[0] = ACTION_DEC1;
         }
         else
         {
