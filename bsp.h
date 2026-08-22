@@ -34,7 +34,8 @@
 #define VOL_UP_BUTTON 0
 #define VOL_DN_BUTTON 1
 
-#define VOL_UP_LED 2
+// #define VOL_UP_LED 2
+#define CHANGE_FUNC_BUTTON 2
 #define VOL_DN_LED 3
 #define USB_STATUS_LED 4
 
@@ -43,6 +44,19 @@
 
 #define LCD_SDA_GPIO 8
 #define LCD_SCL_GPIO 9
+
+#define BUTTON_DEBOUNCE_DELAY_MS 100
+
+
+enum EncoderFunction
+{
+    INCORRECT = 0,
+    INC5,
+    INC1,
+    SET49,
+
+    ENCODER_FUNCTION_MAX,
+};
 
 typedef struct 
 {
@@ -57,8 +71,14 @@ typedef struct
 
 void bspInit();
 void button_callback(uint gpio, uint32_t event_mask);
+void gpioHandler(uint gpio, uint32_t event_mask);
 bool isVolumeUp();
 bool isVolumeDown();
+
+bool isActionAvailable();
+uint8_t getAction();
+
 uint8_t getState();
+void bspTask();
 
 #endif

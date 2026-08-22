@@ -30,6 +30,8 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
 * https://www.reactivated.net/writing_udev_rules.html
 * https://github.com/piersfinlayson/tinyusb-vendor-example
 * https://unix.stackexchange.com/questions/44308/understanding-udev-rules-and-permissions-in-libusb
+* https://elixir.bootlin.com/linux/v7.2/source/drivers/usb/usb-skeleton.c <- Usb driver I think.
+* https://github.com/martinezjavier/ldd3
 ===============================================================
 Komendy:
 * sudo cat /sys/kernel/debug/usb/devices
@@ -42,6 +44,8 @@ Komendy:
     ATTRS{idProduct}=="4013", \
     MODE="0666", \
     TAG+="uaccess"
+* usbip
+* dmesg -w
 
 ## Plan:
 1. libUsb na komputerze & tinyUsb na urządzeniu

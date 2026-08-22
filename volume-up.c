@@ -35,19 +35,19 @@ int main()
     gpio_set_input_enabled(VOL_UP_BUTTON, true);
     gpio_set_pulls(VOL_UP_BUTTON, true, false);
     gpio_set_dir(VOL_UP_BUTTON, false);
-    gpio_set_irq_enabled_with_callback(VOL_UP_BUTTON, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &button_callback);
-    // gpio_set_irq_enabled_with_callback(VOL_UP_BUTTON, GPIO_IRQ_LEVEL_LOW, true, &button_callback);
+    gpio_set_irq_enabled_with_callback(VOL_UP_BUTTON, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &gpioHandler);
+    // gpio_set_irq_enabled_with_callback(VOL_UP_BUTTON, GPIO_IRQ_LEVEL_LOW, true, &gpioHandler);
 
     gpio_init(VOL_DN_BUTTON);
     gpio_set_input_enabled(VOL_DN_BUTTON, true);
     gpio_set_pulls(VOL_DN_BUTTON, true, false);
     gpio_set_dir(VOL_DN_BUTTON, false);
-    gpio_set_irq_enabled_with_callback(VOL_DN_BUTTON, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &button_callback);
-    // gpio_set_irq_enabled_with_callback(VOL_DN_BUTTON, GPIO_IRQ_LEVEL_LOW, true, &button_callback);
+    gpio_set_irq_enabled_with_callback(VOL_DN_BUTTON, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &gpioHandler);
+    // gpio_set_irq_enabled_with_callback(VOL_DN_BUTTON, GPIO_IRQ_LEVEL_LOW, true, &gpioHandler);
 
 
-    initLedGpio(VOL_UP_LED);
-    initLedGpio(VOL_DN_LED);
+    // initLedGpio(VOL_UP_LED);
+    // initLedGpio(VOL_DN_LED);
     initLedGpio(USB_STATUS_LED);    
 
     gpio_init(UART_TX);
@@ -62,6 +62,7 @@ int main()
         // static int count = 0;
         // printf("Hello, world! %d\n", count++);
         usbLoop();
+        bspTask();
         // static int count = 0;
         // printf("Hello, world! %d\n", count++);
         // sleep_ms(1000);

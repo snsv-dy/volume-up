@@ -295,16 +295,9 @@ void vendor_task()
 
     if (tud_vendor_n_int_write_available(0))
     {
-
-        bool volUp = isVolumeUp();
-        bool volDown = isVolumeDown();
-        if (volUp)
+        if (isActionAvailable())
         {
-            writeBuffer[0] = ACTION_INC1;
-        }
-        else if (volDown)
-        {
-            writeBuffer[0] = ACTION_DEC1;
+            writeBuffer[0] = getAction();
         }
         else
         {

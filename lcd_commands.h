@@ -4,6 +4,30 @@
 #define LCD_N_ROWS 2
 #define LCD_N_COLUMNS 16
 
+// Inc5
+// Inc1
+// Set49
+// 
+//  _______________________________
+// |I|I|I|I|I|I|I|I|I|I|I|I|I|I|I|I|
+// |A|A|A|A|A|_|_|_|_|_|_|_|_|_|V|V|
+// 
+// A - selected action
+// V - main sink volume
+// I - Recent sink input media name
+// 
+
+typedef struct
+{
+    uint8_t col;
+    uint8_t row;
+
+    uint8_t colSpan;
+} LcdArea;
+
+
+
+
 // Commands
 #define LCD_CLEAR_DISPLAY       0x01
 #define LCD_RETURN_HOME         0x02
