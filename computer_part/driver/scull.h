@@ -6,7 +6,7 @@
 #endif
 
 #ifndef SCULL_NR_DEVS
-#define SCULL_NR_DEVS 0
+#define SCULL_NR_DEVS 4
 #endif
 
 #ifndef SCULL_QUANTUM
