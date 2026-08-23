@@ -74,12 +74,17 @@ struct scull_qset
     struct scull_qset* next;
 };
 
+
+void scull_cleanup_module(void);
+int scull_trim(struct scull_dev* dev);
+struct scull_qset *scull_follow(struct scull_dev *dev, int n);
+
 int scull_trim(struct scull_dev* dev)
 {
-    struct scull_qset *next, *dptr;
+    struct scull_qset *next;
     int qset = dev->qset;
-    int i;
-    for (struct scull_qset *dptr; dptr; dptr = next)
+
+    for (struct scull_qset *dptr = dev->data; dptr; dptr = next)
     {
         if (dptr->data)
         {
@@ -114,15 +119,29 @@ static void scull_setup_cdev(struct scull_dev *dev, int index)
     err = cdev_add(&dev->cdev, devno, 1);
     if (err)
     {
-        printk(KERN_NOTICE, "Error %d adding scull%d", err, index);
+        printk(KERN_NOTICE "Error %d adding scull%d", err, index);
     }
+}
+void scull_cleanup_module(void)
+{
+    dev_t devno = MKDEV(scull_major, scull_minor);
+
+    if (scull_devices)
+    {
+        for (int i = 0; i < scull_nr_devs; i++)
+        {
+            scull_trim(scull_devices + i);
+            cdev_del(&scull_devices[i].cdev);
+        }
+        kfree(scull_devices);
+    }
+
+    unregister_chrdev_region(devno, scull_nr_devs);
 }
 
 static int scull_init_module(void)
 {
     int result;
-    int i;
-
     dev_t dev = 0;
     
     if (scull_major)
@@ -148,13 +167,13 @@ static int scull_init_module(void)
     {
         scull_devices[i].quantum = scull_quantum;
         scull_devices[i].qset = scull_qset;
-        mute_init(&scull_devices[i].lock);
+        // mutex_init(&scull_devices[i].lock);
         scull_setup_cdev(&scull_devices[i], i);
     }
 
     dev = MKDEV(scull_major, scull_minor + scull_nr_devs);
-    dev += scull_p_init(dev);
-    dev += scull_access_init(dev);
+    // dev += scull_p_init(dev);
+    // dev += scull_access_init(dev);
 
     printk(KERN_ALERT "Hello, world\n");
     return 0;
@@ -164,13 +183,6 @@ static int scull_init_module(void)
         return result;
 }
 
-static void hello_exit(void)
-{
-    printk(KERN_ALERT "Goodbye, cruel world\n");
-}
-
-module_init(scull_init_module);
-module_exit(hello_exit);
 
 loff_t scull_llseek(struct file *, loff_t, int)
 {
@@ -375,6 +387,11 @@ int scull_open(struct inode *inode, struct file *filp)
 
 int scull_release(struct inode *, struct file *)
 {
+    printk(KERN_ALERT "Scull release\n");
 
     return 0;
 }
+
+
+module_init(scull_init_module);
+module_exit(scull_cleanup_module);

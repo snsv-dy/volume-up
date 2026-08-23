@@ -32,8 +32,10 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
 * https://unix.stackexchange.com/questions/44308/understanding-udev-rules-and-permissions-in-libusb
 * https://elixir.bootlin.com/linux/v7.2/source/drivers/usb/usb-skeleton.c <- Usb driver I think.
 * https://github.com/martinezjavier/ldd3
+
 ===============================================================
-Komendy:
+
+## Komendy:
 * sudo cat /sys/kernel/debug/usb/devices
 * lsusb -s 001:006 -v
 * udevadm monitor
@@ -46,6 +48,25 @@ Komendy:
     TAG+="uaccess"
 * usbip
 * dmesg -w
+
+===============================================================
+
+## Kernel linuxa:
+* arch/x86/boot/bzImage
+qemu-system-x86_64 \
+-kernel ./arch/x86/boot/bzImage \
+-hda ./image/ubuntu-18.04-minimal-cloudimg-amd64.img \
+-append "console=ttyS0 init=/sbin/init root=/dev/sda1" \
+-cdrom image/cidata.iso \
+-device e1000,netdev=net0 -netdev user,id=net0,hostfwd=tcp::5555-:22 \
+-nographic \
+-m 512
+* https://radiki.dev/posts/qemu-setup-for-kernel-dev-1/
+* https://dev.to/clobrano/test-kernel-changes-on-qemu-1j5e
+* https://dev.to/franzwong/mount-share-folder-in-qemu-with-same-permission-as-host-2980
+* https://virtio-fs.gitlab.io/howto-qemu.html (Kernel musi być zbudowany z opcją VIRTIO_FS)
+* KERNELDIR=/home/jacek/programy/linux_kernel/linux make
+===============================================================
 
 ## Plan:
 1. libUsb na komputerze & tinyUsb na urządzeniu
