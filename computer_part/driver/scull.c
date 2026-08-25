@@ -217,7 +217,8 @@ struct scull_qset *scull_follow(struct scull_dev *dev, int n)
         memset(qs, 0, sizeof(struct scull_qset));
     }
 
-    while(n--)
+
+    for (int i = 0; i < n; i++)
     {
         if (!qs->next)
         {
@@ -324,14 +325,14 @@ ssize_t scull_write(struct file *filp, const char __user *buffer, size_t count, 
     quantum_pos = rest % quantum;
 
 
-    // printk(KERN_ALERT "[scull_write] "
-    //                 ""
-    //                 "itemsize: %d, "
-    //                 "item: %d, "
-    //                 "set_pos: %d, "
-    //                 "quantum_pos: %d, "
-    //                 "rest: %d\n", 
-    //                 itemsize, item, set_pos, quantum_pos, rest);
+    printk(KERN_ALERT "[scull_write] "
+                    ""
+                    "itemsize: %d, "
+                    "item: %d, "
+                    "set_pos: %d, "
+                    "quantum_pos: %d, "
+                    "rest: %d\n", 
+                    itemsize, item, set_pos, quantum_pos, rest);
 
     dptr = scull_follow(dev, item);
     if (dptr == NULL)

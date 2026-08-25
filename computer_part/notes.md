@@ -66,6 +66,7 @@ qemu-system-x86_64 \
 * https://dev.to/franzwong/mount-share-folder-in-qemu-with-same-permission-as-host-2980
 * https://virtio-fs.gitlab.io/howto-qemu.html (Kernel musi być zbudowany z opcją VIRTIO_FS)
 * KERNELDIR=/home/jacek/programy/linux_kernel/linux make
+* https://serverfault.com/a/330740 <-- ssh without password
 ===============================================================
 
 ## Plan:
