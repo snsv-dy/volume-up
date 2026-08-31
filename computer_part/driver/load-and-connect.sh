@@ -57,6 +57,21 @@ elif [[ "$1" == "make" ]]; then
     source /home/jacek/programy/linux_kernel/buildroot-2026.05.2/output/host/environment-setup
     KERNELDIR=/home/jacek/programy/linux_kernel/buildroot-2026.05.2/output/build/linux-6.18.7
     make
+elif [[ "$1" == "gadget" ]]; then
+    if ! scp -P ${PORT} configfs-gadget.sh root@localhost:/root; then
+        echo "Failed to upload gadget script"
+        exit 1
+    fi
+    if ! ssh -p ${PORT} root@localhost './configfs-gadget.sh'; then
+        echo "Failed to execute gadget script"
+    else
+        echo "Gadget probably created"
+    fi
+elif [[ "$1" == "serial" ]]; then
+    if ! ssh -p ${PORT} root@localhost 'cat /dev/ttyGS0'; then
+        echo "Failed to serial"
+        exit 1
+    fi
 else
     echo "No action to take."
 fi

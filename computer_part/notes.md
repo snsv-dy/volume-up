@@ -34,6 +34,8 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
 * https://github.com/martinezjavier/ldd3
 * https://www.subrat.info/build-kernel-and-userspace/ <-- Spróbuj to, zanim buildroot
 * https://buildroot.org/downloads/manual/manual.html#rootfs-custom
+* https://github.com/xairy/raw-gadget
+* https://docs.kernel.org/usb/gadget_serial.html <-- skompiluj kernel z obsługą /sys/debug czy coś, i dodaj sterownik usbserial??
 
 ===============================================================
 
@@ -50,6 +52,7 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
     TAG+="uaccess"
 * usbip
 * dmesg -w
+
 
 ===============================================================
 
