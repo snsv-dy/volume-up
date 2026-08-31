@@ -463,6 +463,7 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
                   c. nazwy tego powyżej /\
                   d. wybranej komendy (później nie będzie potrzebne, jak dodam resztę przycisków)
                7. Sterownik kernela.
+                  a. mock urządzenia usb
                8. 2 interfejs hid dla przycisków play/pause mute.
 
         */

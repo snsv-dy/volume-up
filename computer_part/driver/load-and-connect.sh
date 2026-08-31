@@ -1,38 +1,67 @@
 #!/bin/bash
 
+PORT=5556
+module_name=scull.ko
+driver_path=driver
+
 if [[ "$1" == "l" ]]; then
-    source ./copy-to-vm.sh
+    # source ./copy-to-vm.sh
+    if ! ssh -p ${PORT} root@localhost 'cd driver'; then
+        if ! ssh -p ${PORT} root@localhost 'mkdir driver'; then
+            echo "Failed to create directory"
+            exit 1
+        fi
+    fi
     
-    if ! ssh -p 5555 root@localhost 'cd /mnt/shared/; ./scull_load'; then
+    if ! scp -P ${PORT} ${module_name} scull_load scull_unload root@localhost:/root/driver/; then
+        echo "Failed to copy files"
+    fi
+    
+    if ! ssh -p ${PORT} root@localhost 'cd driver; ./scull_load'; then
         echo "Failed to load"
+        # if ! ssh -p ${PORT} root@localhost '~/onstart.sh; cd /mnt/shared/; ./scull_load'; then
+        # fi
     fi
     # echo "loadding and shell"
 elif [[ "$1" == "lu" ]]; then
     echo "unload"
-    if ! ssh -p 5555 root@localhost '/mnt/shared/scull_unload'; then
+    if ! ssh -p ${PORT} root@localhost 'driver/scull_unload'; then
         echo "Failed to unload"
     fi
 elif [[ "$1" == "r" ]]; then
     echo "reboot"
 
-    ssh -p 5555 root@localhost reboot || exit 1
+    ssh -p ${PORT} root@localhost reboot || exit 1
     sleep 1
 
     counter=1
-    while ! ssh -p 5555 root@localhost uname -a; do
+    while ! ssh -p ${PORT} root@localhost uname -a; do
         echo "connecting attempt $counter"
         counter=$(($counter + 1))
         sleep 1
     done
 
     # Mount shared dir
-    ssh -p 5555 root@localhost '~/onstart.sh'
+    # ssh -p ${PORT} root@localhost '~/onstart.sh'
     echo "Reboot complete"
+# elif [[ "$1" == "log" ]]; then
+#     echo "printing logs"
+#     ssh -p ${PORT} root@localhost 'killall klogd; bash -c \"cat /proc/kmsg \"' || exit 1
+#     echo "restoring klog"
+#     ssh -p ${PORT} root@localhost 'klogd -c 8' || exit 1
+elif [[ "$1" == "logs" ]]; then
+    if ! scp -P ${PORT} root@localhost:/var/log/kernel.log.* ./machine_logs/; then
+        echo "Failed to fetch logs"
+    fi
+elif [[ "$1" == "make" ]]; then
+    source /home/jacek/programy/linux_kernel/buildroot-2026.05.2/output/host/environment-setup
+    KERNELDIR=/home/jacek/programy/linux_kernel/buildroot-2026.05.2/output/build/linux-6.18.7
+    make
 else
     echo "No action to take."
 fi
 
 
-# ssh -p 5555 root@localhost uname -a
+# ssh -p ${PORT} root@localhost uname -a
 
 # echo "after ssh"

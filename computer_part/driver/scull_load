@@ -12,6 +12,7 @@ fi
 
 insmod ./$module.ko $* || exit 1
 
+# Wait for device to appear in list.
 usleep 200000
 major=$(awk '$2=="scull" {print $1}' /proc/devices)
 

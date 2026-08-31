@@ -32,6 +32,8 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
 * https://unix.stackexchange.com/questions/44308/understanding-udev-rules-and-permissions-in-libusb
 * https://elixir.bootlin.com/linux/v7.2/source/drivers/usb/usb-skeleton.c <- Usb driver I think.
 * https://github.com/martinezjavier/ldd3
+* https://www.subrat.info/build-kernel-and-userspace/ <-- Spróbuj to, zanim buildroot
+* https://buildroot.org/downloads/manual/manual.html#rootfs-custom
 
 ===============================================================
 
@@ -67,6 +69,11 @@ qemu-system-x86_64 \
 * https://virtio-fs.gitlab.io/howto-qemu.html (Kernel musi być zbudowany z opcją VIRTIO_FS)
 * KERNELDIR=/home/jacek/programy/linux_kernel/linux make
 * https://serverfault.com/a/330740 <-- ssh without password
+* https://wiki.alpinelinux.org/wiki/OpenRC
+* rc-update add klogd boot
+* dd if=/dev/random of=/dev/scull0 bs=1k count=10k
+* https://superuser.com/questions/383695/login-with-ssh-user-that-has-no-password-set
+
 ===============================================================
 
 ## Plan:

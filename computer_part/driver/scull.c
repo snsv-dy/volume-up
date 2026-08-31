@@ -391,8 +391,6 @@ ssize_t scull_write(struct file *filp, const char __user *buffer, size_t count, 
         // printk(KERN_ALERT "[scull_write] out:\n");
         mutex_unlock(&dev->lock);
         return retval;
-
-    return 0;
 }
 
 long scull_unlocked_ioctl(struct file *, unsigned int, unsigned long)
