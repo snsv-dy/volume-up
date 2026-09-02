@@ -66,9 +66,15 @@ elif [[ "$1" == "gadget" ]]; then
         echo "Failed to execute gadget script"
     else
         echo "Gadget probably created"
+        if ! ssh -p ${PORT} root@localhost 'echo 0xCAFE 0x4013 > /sys/bus/usb-serial/drivers/generic/new_id'; then
+            echo "Failed to connect gadget to serial driver"
+        else
+            echo "serial driver connected to gadget"
+        fi
     fi
 elif [[ "$1" == "serial" ]]; then
-    if ! ssh -p ${PORT} root@localhost 'cat /dev/ttyGS0'; then
+    if ! ssh -p ${PORT} root@localhost 'picocom -b 9600 -i /dev/ttyGS0'; then
+    # if ! ssh -p ${PORT} root@localhost 'cat /dev/ttyUSB0'; then
         echo "Failed to serial"
         exit 1
     fi

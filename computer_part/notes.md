@@ -36,6 +36,7 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
 * https://buildroot.org/downloads/manual/manual.html#rootfs-custom
 * https://github.com/xairy/raw-gadget
 * https://docs.kernel.org/usb/gadget_serial.html <-- skompiluj kernel z obsługą /sys/debug czy coś, i dodaj sterownik usbserial??
+TODO: Opisz jak skonfigurować kernela, żeby połączyć tego gadgeta ze sterownikiem usbserial.
 
 ===============================================================
 
