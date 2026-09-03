@@ -2,6 +2,7 @@
 # kernel build system and can use its language.
 ifneq ($(KERNELRELEASE),)
 	obj-m := scull.o
+	scull-objs := scull_main.o scull_p.o
 	# Otherwise we were called directly from the command
 	# line; invoke the kernel build system.
 else
@@ -10,3 +11,7 @@ else
 default:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
 endif
+
+
+clean:
+	rm -r *.o *~ core .depend .*.cmd *.ko *.mod.c .tmp_versions *.mod modules.order *.symvers

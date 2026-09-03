@@ -5,3 +5,4 @@ device="scull"
 rmmod $module $* || exit 1
 
 rm -f /dev/${device} /dev/${device}[0-3]
+rm -f /dev/${device}pipe /dev/${device}p[0-3]

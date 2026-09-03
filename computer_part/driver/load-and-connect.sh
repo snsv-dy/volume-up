@@ -78,6 +78,12 @@ elif [[ "$1" == "serial" ]]; then
         echo "Failed to serial"
         exit 1
     fi
+elif [[ "$1" == "pipe" ]]; then
+    if ! ssh -p ${PORT} root@localhost 'cat /dev/scullpipe0'; then
+    # if ! ssh -p ${PORT} root@localhost 'cat /dev/ttyUSB0'; then
+        echo "Failed to /dev/scullpipe0"
+        exit 1
+    fi
 else
     echo "No action to take."
 fi

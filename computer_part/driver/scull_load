@@ -27,6 +27,14 @@ ln -sf ${device}0 /dev/${device}
 chgrp $group /dev/${device}[0-3] 
 chmod $mode  /dev/${device}[0-3]
 
+
+rm -f /dev/scullpipe0
+mknod /dev/scullpipe0 c $major 4
+ln -sf scullpipe0 /dev/scullpipe
+chgrp $group /dev/scullpipe0
+chmod $mode  /dev/scullpipe0
+
+
 # group="wheel"
 # # grep -1 '^staff:' /etc/group || group="wheel"
 
