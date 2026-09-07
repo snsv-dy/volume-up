@@ -55,8 +55,17 @@ elif [[ "$1" == "logs" ]]; then
     fi
 elif [[ "$1" == "make" ]]; then
     source /home/jacek/programy/linux_kernel/buildroot-2026.05.2/output/host/environment-setup
-    KERNELDIR=/home/jacek/programy/linux_kernel/buildroot-2026.05.2/output/build/linux-6.18.7
+    # KERNELDIR=/home/jacek/programy/linux_kernel/buildroot-2026.05.2/output/build/linux-6.18.7
+    # Make drivers
     make
+    # For FunctionFs handler
+    $CC \
+    -I${KERNELDIR}include/uapi/linux/usb/ \
+    -D__force= -D__user= \
+    -o build/gadgetfs_handler \
+    gadgetfs_handler.c \
+    -g -lpthread
+
 elif [[ "$1" == "gadget" ]]; then
     if ! scp -P ${PORT} configfs-gadget.sh root@localhost:/root; then
         echo "Failed to upload gadget script"
@@ -66,12 +75,25 @@ elif [[ "$1" == "gadget" ]]; then
         echo "Failed to execute gadget script"
     else
         echo "Gadget probably created"
-        if ! ssh -p ${PORT} root@localhost 'echo 0xCAFE 0x4013 > /sys/bus/usb-serial/drivers/generic/new_id'; then
-            echo "Failed to connect gadget to serial driver"
-        else
-            echo "serial driver connected to gadget"
-        fi
+        # if ! ssh -p ${PORT} root@localhost 'echo 0xCAFE 0x4013 > /sys/bus/usb-serial/drivers/generic/new_id'; then
+        #     echo "Failed to connect gadget to serial driver"
+        # else
+        #     echo "serial driver connected to gadget"
+        # fi
     fi
+elif [[ "$1" == "gadget-user" ]]; then
+    if ! ssh -p ${PORT} root@localhost 'mkdir -p functionfs && mount -t functionfs usb0 functionfs'; then
+        echo "Failed to mount functionfs"
+    fi
+
+    if ! scp -P ${PORT} build/gadgetfs_handler root@localhost:/root; then
+        echo "Failed to upload gadgetfs_handler"
+    fi  
+
+    if ! ssh -p ${PORT} root@localhost 'cd functionfs && ../gadgetfs_handler'; then
+        echo "Failed to run gadgetfs_handler"
+    fi
+    
 elif [[ "$1" == "serial" ]]; then
     if ! ssh -p ${PORT} root@localhost 'picocom -b 9600 -i /dev/ttyGS0'; then
     # if ! ssh -p ${PORT} root@localhost 'cat /dev/ttyUSB0'; then

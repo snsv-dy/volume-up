@@ -53,6 +53,7 @@ TODO: Opisz jak skonfigurować kernela, żeby połączyć tego gadgeta ze sterow
     TAG+="uaccess"
 * usbip
 * dmesg -w
+* mount -t debugfs none /sys/kernel/debug/
 
 
 ===============================================================
@@ -77,6 +78,11 @@ qemu-system-x86_64 \
 * rc-update add klogd boot
 * dd if=/dev/random of=/dev/scull0 bs=1k count=10k
 * https://superuser.com/questions/383695/login-with-ssh-user-that-has-no-password-set
+* configfs gadget with functionfs
+    1. configure configFS
+    2. mount and configure functionFS
+    3. and then `echo dummy_udc.0 > UDC`
+* https://docs.kernel.org/kbuild/modules.html#:~:text=located%2E-,MO%3D%24BUILD%5FDIR (module build objects in separate directory)
 
 ===============================================================
 

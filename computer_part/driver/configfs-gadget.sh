@@ -16,8 +16,18 @@ mkdir configs/c.1
 mkdir configs/c.1/strings/0x409
 echo "Also idk" > configs/c.1/strings/0x409/configuration
 echo 120 > configs/c.1/MaxPower
-mkdir functions/gser.usb0
-ln -s functions/gser.usb0 configs/c.1
-echo dummy_udc.0 > UDC
+mkdir functions/ffs.usb0
+ln -s functions/ffs.usb0 configs/c.1
+# mkdir functions/gser.usb0
+# ln -s functions/gser.usb0 configs/c.1
+# echo "dummy_udc.0" > UDC
 # mkdir functions/ncm.usb0
 # ln -s functions/ncm.usb0 configs/c.1
+
+# for functionFS
+# mkdir ./functionfs
+# mount -t functionfs usb0 ./functionfs
+
+# 1. configure configFS
+# 2. mount and configure functionFS
+# 3. and then echo dummy_udc.0 > UDC
