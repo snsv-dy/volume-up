@@ -16,6 +16,9 @@ mkdir configs/c.1
 mkdir configs/c.1/strings/0x409
 echo "Also idk" > configs/c.1/strings/0x409/configuration
 echo 120 > configs/c.1/MaxPower
+
+echo "full-speed" > max_speed
+
 mkdir functions/ffs.usb0
 ln -s functions/ffs.usb0 configs/c.1
 # mkdir functions/gser.usb0
