@@ -86,9 +86,13 @@ elif [[ "$1" == "gadget-user" ]]; then
         echo "Failed to mount functionfs"
     fi
 
-    if ! scp -P ${PORT} build/gadgetfs_handler root@localhost:/root; then
-        echo "Failed to upload gadgetfs_handler"
-    fi  
+    if ssh -p ${PORT} root@localhost 'rm gadgetfs_handler'; then
+        if ! scp -P ${PORT} build/gadgetfs_handler root@localhost:/root; then
+            echo "Failed to upload gadgetfs_handler"
+        fi 
+    else
+        echo "Failed to remove previous gadgetfs_handler"
+    fi 
 
     if ! ssh -p ${PORT} root@localhost 'cd functionfs && ../gadgetfs_handler'; then
         echo "Failed to run gadgetfs_handler"

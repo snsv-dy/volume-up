@@ -112,6 +112,9 @@ static const struct {
 	struct usb_functionfs_descs_head_v2 header;
 	__le32 fs_count;
 	// TODO: see functionfs.h:166
+	// 		 Check how the different speed usb work, but
+	// 		 it might be that descriptors for specific speed
+	// 		 can be active at one time.
 	// __le32 hs_count;
 	// __le32 ss_count;
 	struct {
@@ -270,7 +273,7 @@ static ssize_t write_wrap(struct thread *t, const void *buf, size_t nbytes);
 static ssize_t ep0_consume(struct thread *t, const void *buf, size_t nbytes);
 static ssize_t fill_in_buf(struct thread *t, void *buf, size_t nbytes);
 static ssize_t empty_out_buf(struct thread *t, const void *buf, size_t nbytes);
-
+static ssize_t get_command(struct thread *t, void *buf, size_t nbytes);
 
 static struct thread {
 	const char *const filename;
@@ -295,7 +298,7 @@ static struct thread {
 	},
 	{
 		"ep1", 8 * 1024,
-		fill_in_buf, "<in>",
+		get_command, "<in>",
 		write_wrap, NULL,
 		0, 0, NULL, 0
 	},
@@ -362,8 +365,10 @@ static void *start_thread_helper(void *arg)
 
 	for (;;) {
 		pthread_testcancel();
-
+		
+		info("Before in\n");
 		ret = t->in(t, t->buf, t->buf_size);
+		info("After in\n");
 		if (ret > 0) {
 			ret = t->out(t, t->buf, ret);
 			name = out_name;
@@ -372,6 +377,7 @@ static void *start_thread_helper(void *arg)
 			name = in_name;
 			op = "read";
 		}
+		printf("Something h-happened?\n");
 
 		if (ret > 0) {
 			/* nop */
@@ -420,6 +426,62 @@ static ssize_t read_wrap(struct thread *t, void *buf, size_t nbytes)
 static ssize_t write_wrap(struct thread *t, const void *buf, size_t nbytes)
 {
 	return write(t->fd, buf, nbytes);
+}
+
+static enum {
+	ACTION_INCORRECT = 0,
+	ACTION_INC5 = 1,
+	ACTION_DEC5 = 2,
+	ACTION_INC1 = 3,
+	ACTION_DEC1 = 4,
+	ACTION_SET24 = 5,
+	ACTION_SET29 = 6,
+};
+
+static ssize_t get_command(struct thread *t, void *buf, size_t nbytes)
+{
+	unsigned char *civilizedBuffer = buf;
+	int running = 1;
+    char actionChar = '\0';
+    int action;
+    // while(running)
+    // {
+        action = ACTION_INCORRECT;
+        printf("Write action:\n");
+        int nGot = scanf("%c", &actionChar);
+        if (nGot == 1)
+        {
+            if (actionChar == '+') { action = ACTION_INC5; }
+            else if (actionChar == '-') { action = ACTION_DEC5; }
+            else if (actionChar == 'i') { action = ACTION_INC1; }
+            else if (actionChar == 'd') { action = ACTION_DEC1; }
+            else if (actionChar == '4') { action = ACTION_SET24; }
+            else if (actionChar == '9') { action = ACTION_SET29; }
+            // else if (actionChar == '\n') { continue; }
+            else if (actionChar == 'q') { return 0; }
+            
+            info("got '%c', ", actionChar);
+			const char* actionStr = "";
+            switch (action)
+            {
+                case ACTION_INC5: actionStr = "ACTION_INC5"; break;
+                case ACTION_DEC5: actionStr = "ACTION_DEC5"; break;
+                case ACTION_INC1: actionStr = "ACTION_INC1"; break;
+                case ACTION_DEC1: actionStr = "ACTION_DEC1"; break;
+                case ACTION_SET24: actionStr = "ACTION_SET24"; break;
+                case ACTION_SET29: actionStr = "ACTION_SET29"; break;
+                default:
+            }
+            info("Sending action: %s", actionStr);
+			int actionLen = strlen(actionStr);
+			memcpy(buf, actionStr, actionLen);
+			civilizedBuffer[actionLen] = '\n';
+			civilizedBuffer[actionLen + 1] = 0;
+
+			return actionLen + 2;
+        }
+
+	return 0;
 }
 
 
@@ -596,6 +658,16 @@ legacy:
 
 int main(int argc, char **argv)
 {
+	// printf("Write text: ");
+	// char buf[512] = "";
+	// int result = fread(buf, 1, 512, stdin);
+	// printf("fread result: %d\n", result);
+	// if (result > 0)
+	// {
+	// 	printf("got text: `");
+	// 	fwrite(buf, result, 1, stdout);
+	// 	printf("`\n");
+	// }
 	bool legacy_descriptors;
 	unsigned i;
 
