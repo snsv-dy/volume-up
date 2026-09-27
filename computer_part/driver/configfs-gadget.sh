@@ -33,4 +33,4 @@ ln -s functions/ffs.usb0 configs/c.1
 
 # 1. configure configFS
 # 2. mount and configure functionFS
-# 3. and then echo dummy_udc.0 > UDC
+# 3. and then echo "dummy_udc.0" > configfs/usb_gadget/g1/UDC

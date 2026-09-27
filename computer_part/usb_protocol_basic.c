@@ -465,7 +465,6 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
                7. Sterownik kernela.
                   a. mock urządzenia usb
                8. 2 interfejs hid dla przycisków play/pause mute.
-
         */
           
 

@@ -7,29 +7,6 @@
 #include "scull.h"
 #include "scull_p.h"
 
-// Najpierw:
-// [x] 1. Module opens usb device
-//     1.1 Zrób program do mockowania urządzenia z functionFS, na podstawie tools/usb/ffs-aio-example
-//     1.2 Na początek bulk ep
-//     1.3 A potem interrupt, i wtedy można testować interrupta po stronie sterownika jak rzecze punkt 2.
-// [x] 1.4 Folder build na te wygenerowane obiekty, bo zaraz zwariuję.
-//         https://docs.kernel.org/kbuild/modules.html#:~:text=located%2E-,MO%3D%24BUILD%5FDIR
-//     1.5* Buildroot build that mounts debugfs on boot
-//     2. Reads on interrupt data
-//     3. (opcjonalnie) wysyłanie po interrupcie, tak dla picu.
-// Kolejnie:
-// 1. Moduł uruchamia/komunikuje się z audio.c
-// 2. Wysyła żądania od urządzenia
-// 3. Odbiera dane od audio.c i przesyła do urządzenia.
-// Ostatecznie:
-// 1. Hotplug
-// 2. Sink inputy itp
-// ===============
-// [x] Testowanie na virtualnej mazsynie?
-// [x] mockowanie urządzenia gadgetem? czy tym co kiedyś patrzyłeś.
-//     Sterownik windowsa? (resume driven dev)
-//     To w sumie mogłoby działać jak serial driver, ale już niech będzie, jako że to jest resume driven development.
-
 int scull_major = SCULL_MAJOR;
 int scull_minor = 0;
 int scull_nr_devs = SCULL_NR_DEVS;

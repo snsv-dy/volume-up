@@ -121,6 +121,7 @@ static const struct {
 		struct usb_interface_descriptor intf;
 		struct usb_endpoint_descriptor_no_audio sink;
 		struct usb_endpoint_descriptor_no_audio source;
+		// struct usb_endpoint_descriptor_no_audio interrupt_in; // in/out are from host perspective.
 	} __attribute__((packed)) fs_descs;
 } __attribute__((packed)) descriptors = {
 	.header = {
@@ -141,18 +142,26 @@ static const struct {
 			.bLength = sizeof descriptors.fs_descs.sink,
 			.bDescriptorType = USB_DT_ENDPOINT,
 			.bEndpointAddress = 1 | USB_DIR_IN,
-			.bmAttributes = USB_ENDPOINT_XFER_BULK,
-			.wMaxPacketSize = cpu_to_le16(64),
+			.bmAttributes = USB_ENDPOINT_XFER_INT,
+			.wMaxPacketSize = cpu_to_le16(8),
 			.bInterval = 1,
 		},
 		.source = {
 			.bLength = sizeof descriptors.fs_descs.source,
 			.bDescriptorType = USB_DT_ENDPOINT,
 			.bEndpointAddress = 2 | USB_DIR_OUT,
-			.bmAttributes = USB_ENDPOINT_XFER_BULK,
-			.wMaxPacketSize = cpu_to_le16(64),
+			.bmAttributes = USB_ENDPOINT_XFER_INT,
+			.wMaxPacketSize = cpu_to_le16(8),
 			.bInterval = 1,
-		},
+		}
+		// .interrupt_in = {
+		// 	.bLength = sizeof descriptors.fs_descs.interrupt_in,
+		// 	.bDescriptorType = USB_DT_ENDPOINT,
+		// 	.bEndpointAddress = 3 | USB_DIR_IN,
+		// 	.bmAttributes = USB_ENDPOINT_XFER_INT,
+		// 	.wMaxPacketSize = cpu_to_le16(8),
+		// 	.bInterval = 20,
+		// }
 	},
 };
 
@@ -448,38 +457,44 @@ static ssize_t get_command(struct thread *t, void *buf, size_t nbytes)
     // {
         action = ACTION_INCORRECT;
         printf("Write action:\n");
-        int nGot = scanf("%c", &actionChar);
-        if (nGot == 1)
-        {
-            if (actionChar == '+') { action = ACTION_INC5; }
-            else if (actionChar == '-') { action = ACTION_DEC5; }
-            else if (actionChar == 'i') { action = ACTION_INC1; }
-            else if (actionChar == 'd') { action = ACTION_DEC1; }
-            else if (actionChar == '4') { action = ACTION_SET24; }
-            else if (actionChar == '9') { action = ACTION_SET29; }
-            // else if (actionChar == '\n') { continue; }
-            else if (actionChar == 'q') { return 0; }
-            
-            info("got '%c', ", actionChar);
-			const char* actionStr = "";
-            switch (action)
-            {
-                case ACTION_INC5: actionStr = "ACTION_INC5"; break;
-                case ACTION_DEC5: actionStr = "ACTION_DEC5"; break;
-                case ACTION_INC1: actionStr = "ACTION_INC1"; break;
-                case ACTION_DEC1: actionStr = "ACTION_DEC1"; break;
-                case ACTION_SET24: actionStr = "ACTION_SET24"; break;
-                case ACTION_SET29: actionStr = "ACTION_SET29"; break;
-                default:
-            }
-            info("Sending action: %s", actionStr);
-			int actionLen = strlen(actionStr);
-			memcpy(buf, actionStr, actionLen);
-			civilizedBuffer[actionLen] = '\n';
-			civilizedBuffer[actionLen + 1] = 0;
+		while (action == ACTION_INCORRECT)
+		{
+			int nGot = scanf("%c", &actionChar);
+			if (nGot == 1)
+			{
+				if (actionChar == '+') { action = ACTION_INC5; }
+				else if (actionChar == '-') { action = ACTION_DEC5; }
+				else if (actionChar == 'i') { action = ACTION_INC1; }
+				else if (actionChar == 'd') { action = ACTION_DEC1; }
+				else if (actionChar == '4') { action = ACTION_SET24; }
+				else if (actionChar == '9') { action = ACTION_SET29; }
+				else if (actionChar == '\n') { continue; }
+				
+				info("got '%c', ", actionChar);
+				const char* actionStr = "";
+				switch (action)
+				{
+					case ACTION_INC5: actionStr = "ACTION_INC5"; break;
+					case ACTION_DEC5: actionStr = "ACTION_DEC5"; break;
+					case ACTION_INC1: actionStr = "ACTION_INC1"; break;
+					case ACTION_DEC1: actionStr = "ACTION_DEC1"; break;
+					case ACTION_SET24: actionStr = "ACTION_SET24"; break;
+					case ACTION_SET29: actionStr = "ACTION_SET29"; break;
+					default:
+						// Otherwise might hang the application after ctrl + c issued by the ssh.
+						return 0;
+				}
+				info("Sending action: %s", actionStr);
+				// int actionLen = strlen(actionStr);
+				// memcpy(buf, actionStr, actionLen);
+				// civilizedBuffer[actionLen] = '\n';
+				civilizedBuffer[0] = action;
+				// civilizedBuffer[actionLen + 1] = 0;
 
-			return actionLen + 2;
-        }
+				// return actionLen + 2;
+				return 1;
+			}
+		}
 
 	return 0;
 }

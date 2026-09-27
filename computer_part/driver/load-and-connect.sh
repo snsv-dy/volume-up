@@ -82,21 +82,26 @@ elif [[ "$1" == "gadget" ]]; then
         # fi
     fi
 elif [[ "$1" == "gadget-user" ]]; then
+    if ! scp -P ${PORT} build/usb_temp.ko root@localhost:/root; then
+        echo "Failed to upload usb driver"
+    fi 
+
     if ! ssh -p ${PORT} root@localhost 'mkdir -p functionfs && mount -t functionfs usb0 functionfs'; then
         echo "Failed to mount functionfs"
     fi
 
-    if ssh -p ${PORT} root@localhost 'rm gadgetfs_handler'; then
-        if ! scp -P ${PORT} build/gadgetfs_handler root@localhost:/root; then
-            echo "Failed to upload gadgetfs_handler"
-        fi 
-    else
+    if ! ssh -p ${PORT} root@localhost 'rm gadgetfs_handler'; then
         echo "Failed to remove previous gadgetfs_handler"
     fi 
 
-    if ! ssh -p ${PORT} root@localhost 'cd functionfs && ../gadgetfs_handler'; then
-        echo "Failed to run gadgetfs_handler"
-    fi
+    if ! scp -P ${PORT} build/gadgetfs_handler root@localhost:/root; then
+        echo "Failed to upload gadgetfs_handler"
+    else
+        if ! ssh -p ${PORT} root@localhost 'cd functionfs && ../gadgetfs_handler'; then
+            echo "Failed to run gadgetfs_handler"
+        fi
+    fi 
+
     
 elif [[ "$1" == "serial" ]]; then
     if ! ssh -p ${PORT} root@localhost 'picocom -b 9600 -i /dev/ttyGS0'; then

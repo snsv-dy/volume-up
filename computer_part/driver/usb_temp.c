@@ -49,20 +49,20 @@ struct usb_skel {
 	struct usb_interface	*interface;		/* the interface for this device */
 	struct semaphore	limit_sem;		/* limiting the number of writes in progress */
 	struct usb_anchor	submitted;		/* in case we need to retract our submissions */
-	struct urb		*bulk_in_urb;		/* the urb to read data with */
-	unsigned char           *bulk_in_buffer;	/* the buffer to receive data */
-	size_t			bulk_in_size;		/* the size of the receive buffer */
-	size_t			bulk_in_filled;		/* number of bytes in the buffer */
-	size_t			bulk_in_copied;		/* already copied to user space */
-	__u8			bulk_in_endpointAddr;	/* the address of the bulk in endpoint */
-	__u8			bulk_out_endpointAddr;	/* the address of the bulk out endpoint */
+	struct urb		*int_in_urb;		/* the urb to read data with */
+	unsigned char           *int_in_buffer;	/* the buffer to receive data */
+	size_t			int_in_size;		/* the size of the receive buffer */
+	size_t			int_in_filled;		/* number of bytes in the buffer */
+	size_t			int_in_copied;		/* already copied to user space */
+	__u8			int_in_endpointAddr;	/* the address of the int in endpoint */
+	__u8			int_out_endpointAddr;	/* the address of the int out endpoint */
 	int			errors;			/* the last request tanked */
 	bool			ongoing_read;		/* a read is going on */
 	spinlock_t		err_lock;		/* lock for errors */
 	struct kref		kref;
 	struct mutex		io_mutex;		/* synchronize I/O with disconnect */
 	unsigned long		disconnected:1;
-	wait_queue_head_t	bulk_in_wait;		/* to wait for an ongoing read */
+	wait_queue_head_t	int_in_wait;		/* to wait for an ongoing read */
 };
 #define to_skel_dev(d) container_of(d, struct usb_skel, kref)
 
@@ -73,10 +73,10 @@ static void skel_delete(struct kref *kref)
 {
 	struct usb_skel *dev = to_skel_dev(kref);
 
-	usb_free_urb(dev->bulk_in_urb);
+	usb_free_urb(dev->int_in_urb);
 	usb_put_intf(dev->interface);
 	usb_put_dev(dev->udev);
-	kfree(dev->bulk_in_buffer);
+	kfree(dev->int_in_buffer);
 	kfree(dev);
 }
 
@@ -114,6 +114,7 @@ static int skel_open(struct inode *inode, struct file *file)
 	file->private_data = dev;
 
 exit:
+	dev_info(&interface->dev, "skel_open retval: %d", retval);
 	return retval;
 }
 
@@ -123,13 +124,19 @@ static int skel_release(struct inode *inode, struct file *file)
 
 	dev = file->private_data;
 	if (dev == NULL)
+	{
+		printk(KERN_NOTICE "skel_release -enodev");
 		return -ENODEV;
+	}
 
 	/* allow the device to be autosuspended */
 	usb_autopm_put_interface(dev->interface);
 
 	/* decrement the count on our device */
 	kref_put(&dev->kref, skel_delete);
+	
+	printk(KERN_NOTICE "skel_release success");
+
 	return 0;
 }
 
@@ -157,7 +164,7 @@ static int skel_flush(struct file *file, fl_owner_t id)
 	return res;
 }
 
-static void skel_read_bulk_callback(struct urb *urb)
+static void skel_read_int_callback(struct urb *urb)
 {
 	struct usb_skel *dev;
 	unsigned long flags;
@@ -171,43 +178,64 @@ static void skel_read_bulk_callback(struct urb *urb)
 		    urb->status == -ECONNRESET ||
 		    urb->status == -ESHUTDOWN))
 			dev_err(&dev->interface->dev,
-				"%s - nonzero write bulk status received: %d\n",
+				"%s - nonzero write int status received: %d\n",
 				__func__, urb->status);
 
 		dev->errors = urb->status;
 	} else {
-		dev->bulk_in_filled = urb->actual_length;
+		dev->int_in_filled = urb->actual_length;
 	}
 	dev->ongoing_read = 0;
+	
+	dev_info(&dev->interface->dev, "skel_read_int_callback success (len: %u)", urb->actual_length);
+
 	spin_unlock_irqrestore(&dev->err_lock, flags);
 
-	wake_up_interruptible(&dev->bulk_in_wait);
+	wake_up_interruptible(&dev->int_in_wait);
 }
 
+
+// usb_fill_int_urb(struct urb *urb,
+// 				    struct usb_device *dev,
+// 				    unsigned int pipe,
+// 				    void *transfer_buffer,
+// 				    int buffer_length,
+// 				    usb_complete_t complete_fn,
+// 				    void *context,
+// 				    int interval)
+#define INT_POLL_INERVAL 20 // ms
 static int skel_do_read_io(struct usb_skel *dev, size_t count)
 {
 	int rv;
+	int interval = INT_POLL_INERVAL * 8; // Interval for high speed (125 microsecond units)
+	if (dev->udev->speed == USB_SPEED_LOW || dev->udev->speed == USB_SPEED_FULL)
+	{
+		// If my assumptions about how linux handles usb are correct.
+		// Only this value should be ever used.
+		interval = INT_POLL_INERVAL; // For usb1.1 (ms)
+	}
 
 	/* prepare a read */
-	usb_fill_bulk_urb(dev->bulk_in_urb,
+	usb_fill_int_urb(dev->int_in_urb,
 			dev->udev,
-			usb_rcvbulkpipe(dev->udev,
-				dev->bulk_in_endpointAddr),
-			dev->bulk_in_buffer,
-			min(dev->bulk_in_size, count),
-			skel_read_bulk_callback,
-			dev);
+			usb_rcvintpipe(dev->udev,
+				dev->int_in_endpointAddr),
+			dev->int_in_buffer,
+			min(dev->int_in_size, count),
+			skel_read_int_callback,
+			dev,
+			interval);
 	/* tell everybody to leave the URB alone */
 	spin_lock_irq(&dev->err_lock);
 	dev->ongoing_read = 1;
 	spin_unlock_irq(&dev->err_lock);
 
-	/* submit bulk in urb, which means no data to deliver */
-	dev->bulk_in_filled = 0;
-	dev->bulk_in_copied = 0;
+	/* submit int in urb, which means no data to deliver */
+	dev->int_in_filled = 0;
+	dev->int_in_copied = 0;
 
 	/* do it */
-	rv = usb_submit_urb(dev->bulk_in_urb, GFP_KERNEL);
+	rv = usb_submit_urb(dev->int_in_urb, GFP_KERNEL);
 	if (rv < 0) {
 		dev_err(&dev->interface->dev,
 			"%s - failed submitting read urb, error %d\n",
@@ -259,7 +287,7 @@ retry:
 		 * IO may take forever
 		 * hence wait in an interruptible state
 		 */
-		rv = wait_event_interruptible(dev->bulk_in_wait, (!dev->ongoing_read));
+		rv = wait_event_interruptible(dev->int_in_wait, (!dev->ongoing_read));
 		if (rv < 0)
 			goto exit;
 	}
@@ -280,9 +308,9 @@ retry:
 	 * else we need to start IO
 	 */
 
-	if (dev->bulk_in_filled) {
+	if (dev->int_in_filled) {
 		/* we had read data */
-		size_t available = dev->bulk_in_filled - dev->bulk_in_copied;
+		size_t available = dev->int_in_filled - dev->int_in_copied;
 		size_t chunk = min(available, count);
 
 		if (!available) {
@@ -300,15 +328,16 @@ retry:
 		 * data is available
 		 * chunk tells us how much shall be copied
 		 */
+		printk(KERN_ALERT "Got data from device, len: %lu", dev->int_in_filled);
 
 		if (copy_to_user(buffer,
-				 dev->bulk_in_buffer + dev->bulk_in_copied,
+				 dev->int_in_buffer + dev->int_in_copied,
 				 chunk))
 			rv = -EFAULT;
 		else
 			rv = chunk;
 
-		dev->bulk_in_copied += chunk;
+		dev->int_in_copied += chunk;
 
 		/*
 		 * if we are asked for more than we have,
@@ -359,6 +388,9 @@ static void skel_write_bulk_callback(struct urb *urb)
 static ssize_t skel_write(struct file *file, const char *user_buffer,
 			  size_t count, loff_t *ppos)
 {
+	// TODO: Pisanie do urządzenia na chwilę nieczynne.
+	return -ERESTARTSYS;
+
 	struct usb_skel *dev;
 	int retval = 0;
 	struct urb *urb = NULL;
@@ -428,7 +460,7 @@ static ssize_t skel_write(struct file *file, const char *user_buffer,
 
 	/* initialize the urb properly */
 	usb_fill_bulk_urb(urb, dev->udev,
-			  usb_sndbulkpipe(dev->udev, dev->bulk_out_endpointAddr),
+			  usb_sndbulkpipe(dev->udev, dev->int_out_endpointAddr),
 			  buf, writesize, skel_write_bulk_callback, dev);
 	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	usb_anchor_urb(urb, &dev->submitted);
@@ -491,7 +523,7 @@ static int skel_probe(struct usb_interface *interface,
     printk(KERN_NOTICE "[skel_probe] USBSkel-%d", interface->minor);
     
 	struct usb_skel *dev;
-	struct usb_endpoint_descriptor *bulk_in, *bulk_out;
+	struct usb_endpoint_descriptor *int_in, *int_out;
 	int retval;
 
 	/* allocate memory for our device state and initialize it */
@@ -504,7 +536,7 @@ static int skel_probe(struct usb_interface *interface,
 	mutex_init(&dev->io_mutex);
 	spin_lock_init(&dev->err_lock);
 	init_usb_anchor(&dev->submitted);
-	init_waitqueue_head(&dev->bulk_in_wait);
+	init_waitqueue_head(&dev->int_in_wait);
 
 	dev->udev = usb_get_dev(interface_to_usbdev(interface));
 	dev->interface = usb_get_intf(interface);
@@ -512,27 +544,27 @@ static int skel_probe(struct usb_interface *interface,
 	/* set up the endpoint information */
 	/* use only the first bulk-in and bulk-out endpoints */
 	retval = usb_find_common_endpoints(interface->cur_altsetting,
-			&bulk_in, &bulk_out, NULL, NULL);
+			NULL, NULL, &int_in, &int_out);
 	if (retval) {
 		dev_err(&interface->dev,
-			"Could not find both bulk-in and bulk-out endpoints\n");
+			"Could not find both interrupt-in and interrupt-out endpoints\n");
 		goto error;
 	}
 
-	dev->bulk_in_size = usb_endpoint_maxp(bulk_in);
-	dev->bulk_in_endpointAddr = bulk_in->bEndpointAddress;
-	dev->bulk_in_buffer = kmalloc(dev->bulk_in_size, GFP_KERNEL);
-	if (!dev->bulk_in_buffer) {
+	dev->int_in_size = usb_endpoint_maxp(int_in);
+	dev->int_in_endpointAddr = int_in->bEndpointAddress;
+	dev->int_in_buffer = kmalloc(dev->int_in_size, GFP_KERNEL);
+	if (!dev->int_in_buffer) {
 		retval = -ENOMEM;
 		goto error;
 	}
-	dev->bulk_in_urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!dev->bulk_in_urb) {
+	dev->int_in_urb = usb_alloc_urb(0, GFP_KERNEL);
+	if (!dev->int_in_urb) {
 		retval = -ENOMEM;
 		goto error;
 	}
 
-	dev->bulk_out_endpointAddr = bulk_out->bEndpointAddress;
+	dev->int_out_endpointAddr = int_out->bEndpointAddress;
 
 	/* save our data pointer in this interface device */
 	usb_set_intfdata(interface, dev);
@@ -578,7 +610,9 @@ static void skel_disconnect(struct usb_interface *interface)
 	dev->disconnected = 1;
 	mutex_unlock(&dev->io_mutex);
 
-	usb_kill_urb(dev->bulk_in_urb);
+	// (https://manpages.debian.org/testing/linux-manual-4.8/usb_kill_urb.9.en.html)
+	// usb_kill_urb - cancel a transfer request and wait for it to finish
+	usb_kill_urb(dev->int_in_urb);
 	usb_kill_anchored_urbs(&dev->submitted);
 
 	/* decrement our usage count */
@@ -594,7 +628,7 @@ static void skel_draw_down(struct usb_skel *dev)
 	time = usb_wait_anchor_empty_timeout(&dev->submitted, 1000);
 	if (!time)
 		usb_kill_anchored_urbs(&dev->submitted);
-	usb_kill_urb(dev->bulk_in_urb);
+	usb_kill_urb(dev->int_in_urb);
 }
 
 static int skel_suspend(struct usb_interface *intf, pm_message_t message)

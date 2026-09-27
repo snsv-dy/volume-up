@@ -36,7 +36,9 @@ Both the “full” and “empty” cases of the circular buffer look the same: 
 * https://buildroot.org/downloads/manual/manual.html#rootfs-custom
 * https://github.com/xairy/raw-gadget
 * https://docs.kernel.org/usb/gadget_serial.html <-- skompiluj kernel z obsługą /sys/debug czy coś, i dodaj sterownik usbserial??
+* https://docs.kernel.org/driver-api/usb/anchors.html
 TODO: Opisz jak skonfigurować kernela, żeby połączyć tego gadgeta ze sterownikiem usbserial.
+* https://austinmarton.wordpress.com/2011/09/14/sending-raw-ethernet-packets-from-a-specific-interface-in-c-on-linux/
 
 ===============================================================
 
@@ -54,6 +56,7 @@ TODO: Opisz jak skonfigurować kernela, żeby połączyć tego gadgeta ze sterow
 * usbip
 * dmesg -w
 * mount -t debugfs none /sys/kernel/debug/
+* xxd -c 1 /dev/skel0 # Bo komenda od 
 
 
 ===============================================================
@@ -101,3 +104,62 @@ qemu-system-x86_64 \
 3. własna implementacja usb na urządzeniu???
 4. 2 konfiguracje (dla sterownika i klawiatura hid [dla play/pause, mute i jeśli nie połączy się ze sterownikiem])ŚP przetwórstwa rolnego w Polsce, zostały one zainwestowane w 100%. Zdecydowana większość wsparcia ze środków europejskich idzie na pol
 (Co to jest tam powyżej? xD)
+
+===============================================================
+## Protokół usb
+
+Driver devices:
+* /dev/volumeknob       - Interrupt in and out
+* /dev/volumeknob-bulk  - Bulk out (write only)
+
+### Device -> host
+
+{
+    uint8_t action (INC5, INC1, ..., see ../usb_format.h)
+}1B
+
+read /dev/volumeknob in userspace driver part
+
+### Host -> device
+{
+    uint8_t action (Volume change only)
+    float volume
+} 5B
+
+write to /dev/volumeknob in userspace driver part
+
+===============================================================
+## Progress
+
+Legenda:
+[x] - Skończone
+->  - W trakcie
+
+// Najpierw:
+// [x] 1. Module opens usb device
+//     1.1 Zrób program do mockowania urządzenia z functionFS, na podstawie tools/usb/ffs-aio-example
+//     1.2 Na początek bulk ep
+//     1.3 A potem interrupt, i wtedy można testować interrupta po stronie sterownika jak rzecze punkt 2.
+// [x] 1.4 Folder build na te wygenerowane obiekty, bo zaraz zwariuję.
+//         https://docs.kernel.org/kbuild/modules.html#:~:text=located%2E-,MO%3D%24BUILD%5FDIR
+//     1.5* Buildroot build that mounts debugfs on boot
+//     2. Reads on interrupt data
+// [x]    2.1 Adapt read in usb_skel
+// ->     2.2 Adapt write in gadgetfs_handler
+//        2.4 Write userspace interface to the driver
+//            (Może wystarczy zmodyfikować audio.c ??)
+//            (albo jakiś osobny plik/program najpierw, łatwo integrowalny z audio.c później, + rodzaj notyfikacji gdy urządzenie się odłącza/podłącza w trakcie działania programu)
+//     3. (opcjonalnie) wysyłanie po interrupcie, tak dla picu.
+//        3.1 Adapt write in usb_skel (danymi będzie poziom głośności)
+// Kolejnie:
+// 1. Moduł uruchamia/komunikuje się z audio.c
+// 2. Wysyła żądania od urządzenia
+// 3. Odbiera dane od audio.c i przesyła do urządzenia.
+// Ostatecznie:
+// 1. Hotplug
+// 2. Sink inputy itp
+// ===============
+// [x] Testowanie na virtualnej mazsynie?
+// [x] mockowanie urządzenia gadgetem? czy tym co kiedyś patrzyłeś.
+//     Sterownik windowsa? (resume driven dev)
+//     To w sumie mogłoby działać jak serial driver, ale już niech będzie, jako że to jest resume driven development.
