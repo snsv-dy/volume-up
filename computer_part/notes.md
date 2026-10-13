@@ -110,7 +110,7 @@ qemu-system-x86_64 \
 
 Driver devices:
 * /dev/volumeknob       - Interrupt in and out
-* /dev/volumeknob-bulk  - Bulk out (write only)
+<!-- * /dev/volumeknob-bulk  - Bulk out (write only) -->
 
 ### Device -> host
 
@@ -123,10 +123,31 @@ read /dev/volumeknob in userspace driver part
 ### Host -> device
 {
     uint8_t action (Volume change only)
-    float volume
+    uint8_t volume (0 - 100)
 } 5B
 
 write to /dev/volumeknob in userspace driver part
+
+
+### Różne rzeczy
+
+0. Do we store state in driver or, userspace program and driver just passes messages?
+
+1. userspace waits for device.
+2. Dev connected
+3. userspace sends system volume [dev state uninitialized]
+    3.1. How to detect such device appearing in system?
+4. dev responds with ack action [dev state initialized]
+5. ... w przyszłości będzie inicjalizowany youtube i może deinicjalizowany
+
+1. userspace(program) crashes.
+2. userspace opens, sees that device is present
+3. same as before?? (shouldn't matter actually)
+
+1. Dev disconnects? [dev state uninitialized]
+2. same as first case?
+
+1. driver crashes (is possible, without system crashing?)
 
 ===============================================================
 ## Progress

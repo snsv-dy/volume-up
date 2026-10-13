@@ -23,6 +23,20 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     usb_protocol_basic
 )
 
+add_executable(driverUspaceImpl driverUspaceImpl.c)
+
+# Add the standard include files to the build
+target_include_directories(driverUspaceImpl PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}
+        ${CMAKE_CURRENT_LIST_DIR}/../usb_part
+)
+
+# Add any user requested libraries
+# target_link_libraries(driverUspaceImpl PRIVATE
+#     pulse
+#     usb_protocol_basic
+# )
+
 
 add_subdirectory(os/glfw-3.5.1)
 find_package(OpenGL REQUIRED)

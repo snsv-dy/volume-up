@@ -66,6 +66,14 @@ elif [[ "$1" == "make" ]]; then
     gadgetfs_handler.c \
     -g -lpthread
 
+    # For userspace part of the driver
+    # (Move to makefile and the above as well idk.)
+    $CC \
+    -I${PWD}/../../usb_part \
+    -o build/driverUspaceImpl \
+    ../driverUspaceImpl.c \
+    -g -lpthread
+
 elif [[ "$1" == "gadget" ]]; then
     if ! scp -P ${PORT} configfs-gadget.sh root@localhost:/root; then
         echo "Failed to upload gadget script"
@@ -101,7 +109,14 @@ elif [[ "$1" == "gadget-user" ]]; then
             echo "Failed to run gadgetfs_handler"
         fi
     fi 
+elif [[ "$1" == "driver-uspace-shell" ]]; then
+    if ! scp -P ${PORT} build/driverUspaceImpl root@localhost:/root; then
+        echo "Failed to upload usb driver"
+    fi 
 
+    if ! ssh -t -t -p ${PORT} root@localhost './driverUspaceImpl /dev/skel0'; then
+        echo "Failed to run uspace driver"
+    fi
     
 elif [[ "$1" == "serial" ]]; then
     if ! ssh -p ${PORT} root@localhost 'picocom -b 9600 -i /dev/ttyGS0'; then

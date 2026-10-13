@@ -23,7 +23,7 @@ mkdir functions/ffs.usb0
 ln -s functions/ffs.usb0 configs/c.1
 # mkdir functions/gser.usb0
 # ln -s functions/gser.usb0 configs/c.1
-# echo "dummy_udc.0" > UDC
+echo "dummy_udc.0" > UDC
 # mkdir functions/ncm.usb0
 # ln -s functions/ncm.usb0 configs/c.1
 

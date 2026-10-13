@@ -10,7 +10,8 @@ typedef enum
     ACTION_DEC1         = 4,
     ACTION_SET24        = 5,
     ACTION_SET29        = 6,
-    ACTION_GET_VOLUME   = 7,
+    ACTION_GET_VOLUME   = 7, // Sent from host followed by a float
+    ACTION_ACK          = 8, // Sent to host after get volume action was received.
 
     ACTION_LAST,
 } DeviceAction;

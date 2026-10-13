@@ -13,6 +13,8 @@ typedef void (*ActionCallback)(uint32_t action, void* userData);
 // callback - called when device generated an event
 // userData - passed to callback
 // closing  - post this semaphore to close connection to device and return.
+// (driverInit can/should block as it will be called from separate thread in audio.c
+//  see audio.c:inputThread)
 int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* deviceReady);
 void volumeChanged(uint8_t volumePercent);
 // void setActionCallback(ActionCallback callback);
