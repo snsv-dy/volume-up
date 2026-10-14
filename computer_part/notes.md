@@ -166,7 +166,7 @@ Legenda:
 //     1.5* Buildroot build that mounts debugfs on boot
 //     2. Reads on interrupt data
 // [x]    2.1 Adapt read in usb_skel
-// ->     2.2 Adapt write in gadgetfs_handler
+// [x]    2.2 Adapt write in gadgetfs_handler
 //        2.4 Write userspace interface to the driver
 //            (Może wystarczy zmodyfikować audio.c ??)
 //            (albo jakiś osobny plik/program najpierw, łatwo integrowalny z audio.c później, + rodzaj notyfikacji gdy urządzenie się odłącza/podłącza w trakcie działania programu)

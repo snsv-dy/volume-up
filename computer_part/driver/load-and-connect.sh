@@ -68,11 +68,9 @@ elif [[ "$1" == "make" ]]; then
 
     # For userspace part of the driver
     # (Move to makefile and the above as well idk.)
-    $CC \
-    -I${PWD}/../../usb_part \
-    -o build/driverUspaceImpl \
-    ../driverUspaceImpl.c \
-    -g -lpthread
+    pushd ../userspace-driver/
+    source temporary-build-helper.sh
+    popd
 
 elif [[ "$1" == "gadget" ]]; then
     if ! scp -P ${PORT} configfs-gadget.sh root@localhost:/root; then
@@ -110,11 +108,11 @@ elif [[ "$1" == "gadget-user" ]]; then
         fi
     fi 
 elif [[ "$1" == "driver-uspace-shell" ]]; then
-    if ! scp -P ${PORT} build/driverUspaceImpl root@localhost:/root; then
+    if ! scp -P ${PORT} ../userspace-driver/build/UserspaceDriverImpl root@localhost:/root; then
         echo "Failed to upload usb driver"
     fi 
 
-    if ! ssh -t -t -p ${PORT} root@localhost './driverUspaceImpl /dev/skel0'; then
+    if ! ssh -t -t -p ${PORT} root@localhost './UserspaceDriverImpl /dev/skel0'; then
         echo "Failed to run uspace driver"
     fi
     

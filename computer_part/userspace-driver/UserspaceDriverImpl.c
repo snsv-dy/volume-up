@@ -16,6 +16,7 @@
 // 3. implement writing from the device interface function.
 // 4. error handling
 // 5. gracefull close (even on failing to open udev file. Currently it's a segfault)
+// x. testing.
 
 typedef struct
 {
