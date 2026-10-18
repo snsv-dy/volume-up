@@ -513,6 +513,8 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
             sem_post(deviceReady);
         }
         sem_wait(closing);
+        // TODO: sposób na poinformowanie audio.c, że sterownik się zamknął.
+        //       przez callback, więc możliwe, że obejdzie się bez modyfikacji tutaj.
         printf ("[sem posted]\n");
 
         // printf ("[Char read] '%c'\n", theGuy);

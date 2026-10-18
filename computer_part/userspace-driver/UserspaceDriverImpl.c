@@ -11,6 +11,17 @@
 #include "device_interface.h"
 #include <usb_format.h>
 
+#include "UserSpaceDriverImpl.h"
+
+#ifdef UNIT_TESTING
+
+int example_main(int argc, char *argv[]);
+#define main example_main
+
+#define static 
+
+#endif
+
 // 1. Read & write threads
 // 2. profit
 // 3. implement writing from the device interface function.
@@ -18,25 +29,20 @@
 // 5. gracefull close (even on failing to open udev file. Currently it's a segfault)
 // x. testing.
 
-typedef struct
+void shutdownThreads(ProgramState* programState)
 {
-    FILE* device;
-    int readFile;
-    pthread_t readThread;
-    ActionCallback callback;
-    void* callbackData;
-
-    int writeFile;
-    pthread_t writeThread;
-    uint8_t writeBuffer[2];
-    pthread_cond_t writeWaitCond;
-    pthread_mutex_t writeWaitMut;
-    uint8_t writeReady;
+    if (programState->readThreadRunning)
+    {
+        close(programState->readFile);
+        pthread_join(programState->readThread, NULL);
+    }
     
-    int running;
-    sem_t* closing;
-    sem_t* deviceReady;
-} ProgramState;
+    if (programState->writeThreadRunning)
+    {
+        close(programState->writeFile);
+        pthread_join(programState->writeThread, NULL);
+    }
+}
 
 #define DEVPATH_STATIC_LEN 128
 static char devpath[DEVPATH_STATIC_LEN] = "testfifo";
@@ -45,7 +51,7 @@ void *readThread(void* arg)
 {
     ProgramState* programState = (ProgramState*)arg;
     uint8_t action = ACTION_INCORRECT;
-    while (programState->running)
+    while (programState->readThreadRunning)
     {
         // size_t count = fread(&action, 1, 1, file);
         ssize_t count = read(programState->readFile, &action, 1);
@@ -73,8 +79,13 @@ void *readThread(void* arg)
         }
     }
 
+    programState->readThreadRunning = false;
+    close(programState->readFile);
+    shutdownThreads(programState);
     printf("[read] thread end\n");
+    // 
     // TODO: try recover, or do this through driverInit by the upper layer.
+    //       We don't recover, udev will start the driver when device is connected again.
 }
 
 void *writeThread(void* arg)
@@ -82,15 +93,15 @@ void *writeThread(void* arg)
     ProgramState* programState = (ProgramState*)arg;
     sem_post(programState->deviceReady);
 
-    while (programState->running)
+    while (programState->writeThreadRunning)
     {
         pthread_mutex_lock(&programState->writeWaitMut);
-        while (programState->running && !programState->writeReady)
+        while (programState->writeThreadRunning && !programState->writeReady)
         {
             pthread_cond_wait(&programState->writeWaitCond, &programState->writeWaitMut);
         }
 
-        if (!programState->running)
+        if (!programState->writeThreadRunning)
         {
             break;
             // exit
@@ -117,15 +128,16 @@ void *writeThread(void* arg)
         programState->writeReady = 0;
         pthread_mutex_unlock(&programState->writeWaitMut);
     }
+    programState->writeThreadRunning = false;
+    close(programState->writeFile);
     pthread_mutex_unlock(&programState->writeWaitMut);
-    // programState->running = false;
+    shutdownThreads(programState);
 }
 
 static ProgramState programState = {0};
 
 int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* deviceReady)
 {
-
     programState.readFile = open(devpath, O_RDONLY | O_CLOEXEC);
     if (programState.readFile == -1)
     {
@@ -144,7 +156,8 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
     // char devpath[128] = "/dev/volumeknob";
     // char devpath[128] = "testfifo";
 
-    programState.running = true;
+    programState.writeThreadRunning = true;
+    programState.readThreadRunning = true;
     programState.closing = closing;
     programState.deviceReady = deviceReady;
     programState.callback = callback;
@@ -164,7 +177,7 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
     if (pthread_create(&programState.readThread, NULL, readThread, (void*)&programState) != 0)
     {
         perror("Failed to create input thread");
-        programState.running = false;
+        programState.writeThreadRunning = false;
         close(programState.readFile);
         close(programState.writeFile);
         return errno;
@@ -173,12 +186,45 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
     if (pthread_create(&programState.writeThread, NULL, writeThread, (void*)&programState) != 0)
     {
         perror("Failed to create output thread");
-        programState.running = false;
+        programState.readThreadRunning = false;
         close(programState.readFile);
         close(programState.writeFile);
         pthread_join(programState.readThread, NULL);
         return errno;
     }
+
+    if (deviceReady != NULL)
+    {
+        sem_post(deviceReady);
+    }
+
+
+    if (closing)
+    {
+        sem_wait(closing);
+    }
+    else
+    {
+        // TODO: runtime error. closing should be passed by audio.c
+        while (programState.writeThreadRunning && programState.readThreadRunning)
+        {
+            sleep(1);
+            // static uint8_t volume = 0;
+            // volumeChanged(volume);
+            // volume++;
+        }
+    }
+
+    shutdownThreads(&programState);
+
+    // pthread_join(programState.readThread, NULL);
+    // pthread_join(programState.writeThread, NULL);
+
+    // TODO: Move to driverInit when he will be blocking.
+    // TODO: Keep track if file was closed??? 
+    // double close only results in EBADF errno.
+    // close(programState.readFile);
+    // close(programState.writeFile);
 
     return 0;
 }
@@ -198,7 +244,8 @@ void interruptSignalHandler()
 {
     printf("[ctrl+c] Received\n");
     // Zamykanie wątków komunikacji z urządzeniem.
-    programState.running = 0;
+    // programState.running = 0;
+    shutdownThreads(&programState);
     sem_post(programState.closing);
     
     printf("[ctrl+c] Finished\n");
@@ -234,7 +281,7 @@ void printingCallback(uint32_t action, void* userData)
 }
 
 
-// Main tylko do testowania w sumie.
+// Main tylko do testowania w sumie, bo finalnie to będzie używane jako biblioteka.
 int main(int argc, char **argv)
 {
     initInterruptSignal();
@@ -275,20 +322,6 @@ int main(int argc, char **argv)
     }
     sem_destroy(&waitForDeviceThread);
 
-    while (programState.running)
-    {
-        sleep(1);
-        // static uint8_t volume = 0;
-        // volumeChanged(volume);
-        // volume++;
-    }
-
-    pthread_join(programState.readThread, NULL);
-    pthread_join(programState.writeThread, NULL);
-
-    // TODO: Move to driverInit when he will be blocking.
-    close(programState.readFile);
-    close(programState.writeFile);
 
     return 0;
 }

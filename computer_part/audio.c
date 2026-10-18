@@ -224,6 +224,7 @@ void actionFromDeviceCallback(uint32_t action, void* userData)
     uint32_t paAction = 0;
     switch(action)
     {
+        // TODO: Use enums here, wtf is this?
         case 1: paAction = 0b0000001; break; //ACTION_INC5  ACTION_INC5
         case 2: paAction = 0b0000010; break; //ACTION_DEC5  ACTION_DEC5
         case 3: paAction = 0b0000100; break; //ACTION_INC1  ACTION_INC1
@@ -231,6 +232,7 @@ void actionFromDeviceCallback(uint32_t action, void* userData)
         case 5: paAction = 0b0010000; break; //ACTION_SET24 ACTION_SET24
         case 6: paAction = 0b0100000; break; //ACTION_SET29 ACTION_SET29
         case 7: paAction = 0; break; //ACTION_GET_VOLUME   = ,
+        case 9: paAction = ACTION_SHUT_DOWN; break;
     }
 
     printf("[audio.c] got action: %x\n", paAction);

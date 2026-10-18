@@ -170,6 +170,11 @@ Legenda:
 //        2.4 Write userspace interface to the driver
 //            (Może wystarczy zmodyfikować audio.c ??)
 //            (albo jakiś osobny plik/program najpierw, łatwo integrowalny z audio.c później, + rodzaj notyfikacji gdy urządzenie się odłącza/podłącza w trakcie działania programu)
+//        2.7 
+//        2.5 Tests for userspace driver
+//            2.5.1 Unit: Read/write normally, device disconnects
+//            2.5.2 Integration/e2e: device reconnects, 
+//        2.6 Tests for audio.c???
 //     3. (opcjonalnie) wysyłanie po interrupcie, tak dla picu.
 //        3.1 Adapt write in usb_skel (danymi będzie poziom głośności)
 // Kolejnie:

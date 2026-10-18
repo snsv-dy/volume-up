@@ -1,0 +1,48 @@
+@startuml
+' This starts when device is plugged in.
+
+activate audio.c
+audio.c -> pulseaudio: connects to
+activate pulseaudio
+audio.c -> UserspaceDriver: starts
+activate UserspaceDriver
+UserspaceDriver -> device: opens
+activate device
+
+alt pulseaudio shits itself
+ pulseaudio -> audio.c: i shat myself
+ deactivate pulseaudio
+ audio.c -> UserspaceDriver: requests shutdown
+ UserspaceDriver -> device: send fail reason
+ device -> device: displays why driver failed
+ UserspaceDriver -> device: close
+ deactivate device
+ UserspaceDriver -> audio.c: signal via semaphore
+ deactivate UserspaceDriver
+
+ audio.c -> audio.c: profit
+else device disconnected
+ activate pulseaudio
+ activate device
+ activate UserspaceDriver
+ device -> UserspaceDriver: disconnects
+ deactivate device
+ UserspaceDriver -> audio.c: signal via semaphore
+ deactivate UserspaceDriver
+ audio.c -> pulseaudio: disconnects
+ deactivate pulseaudio
+
+ audio.c -> audio.c: profit
+else no device
+ activate pulseaudio
+ activate UserspaceDriver
+ UserspaceDriver -> device: open
+ device -> UserspaceDriver: not here
+ UserspaceDriver -> audio.c: signal via semaphore
+ deactivate UserspaceDriver
+ audio.c -> pulseaudio: disconnects
+ deactivate pulseaudio
+
+ audio.c -> audio.c: profit
+end
+@enduml

@@ -12,6 +12,7 @@ typedef enum
     ACTION_SET29        = 6,
     ACTION_GET_VOLUME   = 7, // Sent from host followed by a float
     ACTION_ACK          = 8, // Sent to host after get volume action was received.
+    ACTION_DEVICE_SHUTDOWN = 9, // Sent to audio.c from driver when there is a problem with device.
 
     ACTION_LAST,
 } DeviceAction;
