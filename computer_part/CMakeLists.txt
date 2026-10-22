@@ -22,14 +22,15 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     pulse
     usb_protocol_basic
 )
+add_executable(closefiletest closefiletest.c)
 
-add_executable(driverUspaceImpl driverUspaceImpl.c)
+# add_executable(driverUspaceImpl driverUspaceImpl.c)
 
-# Add the standard include files to the build
-target_include_directories(driverUspaceImpl PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}
-        ${CMAKE_CURRENT_LIST_DIR}/../usb_part
-)
+# # Add the standard include files to the build
+# target_include_directories(driverUspaceImpl PRIVATE
+#         ${CMAKE_CURRENT_LIST_DIR}
+#         ${CMAKE_CURRENT_LIST_DIR}/../usb_part
+# )
 
 # Add any user requested libraries
 # target_link_libraries(driverUspaceImpl PRIVATE

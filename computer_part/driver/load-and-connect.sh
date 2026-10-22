@@ -103,7 +103,7 @@ elif [[ "$1" == "gadget-user" ]]; then
     if ! scp -P ${PORT} build/gadgetfs_handler root@localhost:/root; then
         echo "Failed to upload gadgetfs_handler"
     else
-        if ! ssh -p ${PORT} root@localhost 'cd functionfs && ../gadgetfs_handler'; then
+        if ! ssh -t -t -p ${PORT} root@localhost 'cd functionfs && ../gadgetfs_handler'; then
             echo "Failed to run gadgetfs_handler"
         fi
     fi 

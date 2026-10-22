@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <fcntl.h> 
+#include <semaphore.h>
+#include <stdatomic.h>
 
 #include "device_interface.h"
 #include <usb_format.h>
@@ -29,32 +31,70 @@ int example_main(int argc, char *argv[]);
 // 5. gracefull close (even on failing to open udev file. Currently it's a segfault)
 // x. testing.
 
-void shutdownThreads(ProgramState* programState)
+static atomic_int threadInitializedN = 0;
+void reportThreadUp()
 {
-    if (programState->readThreadRunning)
-    {
-        close(programState->readFile);
-        pthread_join(programState->readThread, NULL);
-    }
+    // if (threadInitializedN++ == 1)
+    // {
+    //     sem_post(programState.deviceReady);
+    // }
+}
+
+
+// Włącza SIGUSR1 w wywołującym wątku.
+void enableSigusr1()
+{
+    sigset_t set;
+    int s;
     
-    if (programState->writeThreadRunning)
+    // Odblokowanie sygnału w wątku wykonującym operacje na pliku.
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR1);
+    s = pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+    if (s != 0)
     {
-        close(programState->writeFile);
-        pthread_join(programState->writeThread, NULL);
+        perror("pthread_sigmask");
     }
 }
 
 #define DEVPATH_STATIC_LEN 128
-static char devpath[DEVPATH_STATIC_LEN] = "testfifo";
+static char devpath[DEVPATH_STATIC_LEN] = "/dev/skel0";
+
+void shutdownThreads(ProgramState* programState, bool fromRead, bool fromWrite)
+{
+    programState->running = false;
+    programState->callback(ACTION_DEVICE_SHUTDOWN, programState->callbackData);
+
+    if (!fromRead)
+    {
+        pthread_kill(programState->readThread, SIGUSR1);
+    }
+
+    if (!fromWrite)
+    {
+        pthread_mutex_lock(&programState->writeWaitMut);
+        // Wywołaj wątek write. Jak zobaczy, że program nie jest running to się zakończy.
+        pthread_cond_broadcast(&programState->writeWaitCond);
+        pthread_mutex_unlock(&programState->writeWaitMut);
+        // Na wszelki wypadek, jakby był w trakcie zapisywania czegoś idk.
+        pthread_kill(programState->writeThread, SIGUSR1);
+    }
+}
 
 void *readThread(void* arg)
 {
+    enableSigusr1();
+    reportThreadUp();
+
     ProgramState* programState = (ProgramState*)arg;
     uint8_t action = ACTION_INCORRECT;
-    while (programState->readThreadRunning)
+    ssize_t count = 0;
+    bool killProgram = false;
+    printf("[read] programState->running: %d\n", programState->running);
+    while (programState->running)
     {
         // size_t count = fread(&action, 1, 1, file);
-        ssize_t count = read(programState->readFile, &action, 1);
+        count = read(programState->file, &action, 1);
         if (count > 0)
         {
             if (programState->callback)
@@ -62,102 +102,159 @@ void *readThread(void* arg)
                 // Pass value from device to the rest of the program.
                 programState->callback(action, programState->callbackData);
             }
-            printf("Read %x\n", action);
+            printf("[read] action: %x\n", action);
         }
         else if (count < 0)
         {
-            perror("read");
-            printf("size: %i\n", count);
-            // TODO: signal the write thread and close.
-            // running = 0;??
-            break;
+            if (errno != EINTR)
+            {
+                perror("read");
+                printf("[read] size: %i, errno: \n", count, errno);
+                killProgram = true;
+                break;
+            }
         }
         else
         {
             printf("[read] eof\n");
+            killProgram = true;
             break;
         }
     }
 
-    programState->readThreadRunning = false;
-    close(programState->readFile);
-    shutdownThreads(programState);
+    if (killProgram)
+    {
+        printf("[read] killing program\n");
+        shutdownThreads(programState, true, false);
+    }
+    // programState->readThreadRunning = false;
+    
+    // close(programState->readFile);
     printf("[read] thread end\n");
     // 
     // TODO: try recover, or do this through driverInit by the upper layer.
     //       We don't recover, udev will start the driver when device is connected again.
 }
 
+// Write disabled for now, by usb_temp.c:392
 void *writeThread(void* arg)
 {
+    enableSigusr1();
+    reportThreadUp();
+
     ProgramState* programState = (ProgramState*)arg;
     sem_post(programState->deviceReady);
 
-    while (programState->writeThreadRunning)
+    bool killProgram = false;
+    printf("[read] programState->running: %d\n", programState->running);
+    while (programState->running)
     {
         pthread_mutex_lock(&programState->writeWaitMut);
-        while (programState->writeThreadRunning && !programState->writeReady)
+        while (programState->running && !programState->writeReady)
         {
             pthread_cond_wait(&programState->writeWaitCond, &programState->writeWaitMut);
+            if (errno == EINTR)
+            {
+                printf("pthread_cond_wait interrupted\n");
+            }
         }
 
-        if (!programState->writeThreadRunning)
+        if (!programState->running)
         {
+            printf("[write] !programState->running after wait\n");
+            pthread_mutex_unlock(&programState->writeWaitMut);
             break;
             // exit
         }
 
         ssize_t count = 0;
-        bool weBail = false;
         while (count < 2)
         {
-            ssize_t written = write(programState->writeFile, programState->writeBuffer + count, 2 - count);
+            ssize_t written = write(programState->file, programState->writeBuffer + count, 2 - count);
             if (written <= 0) // 0 (eof) or -1 (error)
             {
                 perror("write");
-                weBail = true;
+                killProgram = true;
                 break;
             }
             count += written;
         }
-        if (weBail)
+
+        if (killProgram)
         {
+            printf("[write] write error or eof\n");
+            pthread_mutex_unlock(&programState->writeWaitMut);
             break;
         }
 
         programState->writeReady = 0;
         pthread_mutex_unlock(&programState->writeWaitMut);
     }
-    programState->writeThreadRunning = false;
-    close(programState->writeFile);
-    pthread_mutex_unlock(&programState->writeWaitMut);
-    shutdownThreads(programState);
+
+    if (killProgram)
+    {
+        printf("[write] killing program\n");
+        shutdownThreads(programState, false, true);
+    }
+
+    printf("[write] end\n");
+}
+
+// Obsługa sygnału.
+void signalHandler()
+{
+    // programState should be set to false, if we actually want to exit application.
+    // Should be done before signaling.
+}
+
+static void initUsr1Signal()
+{
+    // Rejestracja obsługi sygnału.
+    struct sigaction sa;
+    sa.sa_handler = signalHandler;  
+    // sa.sa_flags = SA_RESTART;
+    sa.sa_flags = 0;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGUSR1, &sa, NULL))
+    {
+        printf("Failed to set SIGINT action\n");
+    }
+
+    sigset_t set;
+    int s;
+    
+    // Blokowanie sygnału w mainie.
+    sigemptyset(&set);
+    sigaddset(&set, SIGUSR1);
+    s = pthread_sigmask(SIG_BLOCK, &set, NULL);
+    if (s != 0)
+    {
+        perror("pthread_sigmask");
+    }
 }
 
 static ProgramState programState = {0};
-
+//
+// Zakładam, że ta funkcja jest wywoływana więcej niż raz w trakcie życia procesu.
+// (Bo to w sumie jest wątek komunikujący się z urządzeniem, i jeżeli kończy się
+//  to tracimy możliwość komunikacji z urządzeniem i sterownik przestaje być użyteczny.)
+// 
 int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* deviceReady)
 {
-    programState.readFile = open(devpath, O_RDONLY | O_CLOEXEC);
-    if (programState.readFile == -1)
+    programState.file = open(devpath, O_RDWR | O_CLOEXEC);
+    if (programState.file == -1)
     {
         perror("[init] fopen /dev/volumeknob");
         return errno;
     }
 
-    programState.writeFile = open(devpath, O_RDONLY | O_CLOEXEC);
-    if (programState.writeFile == -1)
-    {
-        // Would be strange to arrive here.
-        close(programState.readFile);
-        perror("[init] fopen /dev/volumeknob");
-        return errno;
-    }
-    // char devpath[128] = "/dev/volumeknob";
-    // char devpath[128] = "testfifo";
+    // Sygnał do zakańczania blokujących operacji na plikach.
+    // (Bo sterownik może nie implementować epolla)
+    initUsr1Signal();
+    programState.running = true;
 
-    programState.writeThreadRunning = true;
-    programState.readThreadRunning = true;
+    // programState.writeThreadRunning = true;
+    // programState.readThreadRunning = true;
     programState.closing = closing;
     programState.deviceReady = deviceReady;
     programState.callback = callback;
@@ -169,26 +266,24 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
     )
     {
         perror("itc cond");
-        close(programState.readFile);
-        close(programState.writeFile);
+        close(programState.file);
         return errno;
     }
 
     if (pthread_create(&programState.readThread, NULL, readThread, (void*)&programState) != 0)
     {
         perror("Failed to create input thread");
-        programState.writeThreadRunning = false;
-        close(programState.readFile);
-        close(programState.writeFile);
+        programState.running = false;
+        close(programState.file);
         return errno;
     }
 
     if (pthread_create(&programState.writeThread, NULL, writeThread, (void*)&programState) != 0)
     {
+        // TODO: zamknij czytający wątek.
         perror("Failed to create output thread");
-        programState.readThreadRunning = false;
-        close(programState.readFile);
-        close(programState.writeFile);
+        programState.running = false;
+        close(programState.file);
         pthread_join(programState.readThread, NULL);
         return errno;
     }
@@ -201,12 +296,19 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
 
     if (closing)
     {
-        sem_wait(closing);
+        // sem_wait(closing);
+        while(sem_trywait(closing) == -1)
+        {
+            sleep(1);
+            static uint8_t volume = 0;
+            volumeChanged(volume);
+            volume++;
+        }
     }
     else
     {
         // TODO: runtime error. closing should be passed by audio.c
-        while (programState.writeThreadRunning && programState.readThreadRunning)
+        while (programState.running)
         {
             sleep(1);
             // static uint8_t volume = 0;
@@ -215,10 +317,34 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
         }
     }
 
-    shutdownThreads(&programState);
+    if (programState.running)
+    {
+        programState.running = false;
 
-    // pthread_join(programState.readThread, NULL);
-    // pthread_join(programState.writeThread, NULL);
+        pthread_kill(programState.readThread, SIGUSR1);
+        pthread_kill(programState.writeThread, SIGUSR1);
+    }
+
+    pthread_join(programState.readThread, NULL);
+    pthread_join(programState.writeThread, NULL);
+
+    int result = close(programState.file);
+    if (result == -1)
+    {
+        int closecount = 0;
+        while (closecount++ < 2 && errno == EINTR)
+        {
+            if (closecount > 1)
+            {
+                printf("[driverMain] file close retry: %d, last_errno: %d\n", closecount, errno);
+            }
+            result = close(programState.file);
+        }
+        if (result != 0)
+        {
+            perror("file close");
+        }
+    }
 
     // TODO: Move to driverInit when he will be blocking.
     // TODO: Keep track if file was closed??? 
@@ -245,7 +371,6 @@ void interruptSignalHandler()
     printf("[ctrl+c] Received\n");
     // Zamykanie wątków komunikacji z urządzeniem.
     // programState.running = 0;
-    shutdownThreads(&programState);
     sem_post(programState.closing);
     
     printf("[ctrl+c] Finished\n");
@@ -263,6 +388,7 @@ void initInterruptSignal()
     }
 }
 
+static sem_t closing;
 void printingCallback(uint32_t action, void* userData)
 {
     printf("Received command from dev: ");
@@ -274,6 +400,12 @@ void printingCallback(uint32_t action, void* userData)
         case ACTION_DEC1: printf("ACTION_DEC1"); break;
         case ACTION_SET24: printf("ACTION_SET24"); break;
         case ACTION_SET29: printf("ACTION_SET29"); break;
+        case ACTION_DEVICE_SHUTDOWN: 
+        {
+            printf("ACTION_DEVICE_SHUTDOWN");
+            sem_post(&closing);
+        }
+        break;
         default:
             printf("default");
     }
@@ -287,7 +419,6 @@ int main(int argc, char **argv)
     initInterruptSignal();
 
     sem_t waitForDeviceThread;
-    sem_t closing;
     if (
            sem_init(&closing, 0, 0)
         || sem_init(&waitForDeviceThread, 0, 0)
@@ -321,7 +452,6 @@ int main(int argc, char **argv)
         printf("Device connected.\n");
     }
     sem_destroy(&waitForDeviceThread);
-
 
     return 0;
 }
