@@ -25,6 +25,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <stdint.h>
 // #include <tools/le_byteshift.h>
 
 // #include "uapi/linux/usb/functionfs.h"
@@ -280,6 +281,8 @@ struct thread;
 static ssize_t read_wrap(struct thread *t, void *buf, size_t nbytes);
 static ssize_t write_wrap(struct thread *t, const void *buf, size_t nbytes);
 static ssize_t ep0_consume(struct thread *t, const void *buf, size_t nbytes);
+
+static ssize_t print_volume(struct thread *t, const void *buf, size_t nbytes);
 static ssize_t fill_in_buf(struct thread *t, void *buf, size_t nbytes);
 static ssize_t empty_out_buf(struct thread *t, const void *buf, size_t nbytes);
 static ssize_t get_command(struct thread *t, void *buf, size_t nbytes);
@@ -314,7 +317,7 @@ static struct thread {
 	{
 		"ep2", 8 * 1024,
 		read_wrap, NULL,
-		empty_out_buf, "<out>",
+		print_volume, "<out>",
 		0, 0, NULL, 0
 	},
 };
@@ -497,6 +500,20 @@ static ssize_t get_command(struct thread *t, void *buf, size_t nbytes)
 		}
 
 	return 0;
+}
+
+static ssize_t print_volume(struct thread *t, const void *buf, size_t nbytes)
+{
+	if (nbytes < 2)
+	{
+		printf("[print volume]: nbytes < 2: %d\n", nbytes);
+		return nbytes;
+	}
+
+	uint8_t* intBuf = (uint8_t*)buf;
+	printf("[print volume]: action: %d, volume: %d\n", intBuf[0], intBuf[1]);
+
+	return nbytes;
 }
 
 

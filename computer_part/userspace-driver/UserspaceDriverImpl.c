@@ -357,6 +357,7 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
 
 void volumeChanged(uint8_t volumePercent)
 {
+    printf("[volumeChanged] setting volume to: %d\n", volumePercent);
     pthread_mutex_lock(&programState.writeWaitMut);
     programState.writeBuffer[0] = ACTION_GET_VOLUME;
     programState.writeBuffer[1] = volumePercent;

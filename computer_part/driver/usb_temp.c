@@ -203,7 +203,7 @@ static void skel_read_int_callback(struct urb *urb)
 // 				    usb_complete_t complete_fn,
 // 				    void *context,
 // 				    int interval)
-#define INT_POLL_INERVAL 20 // ms
+#define INT_POLL_INERVAL 20 // ms, TODO: Sprawdź czy to napewno ms a nie 1/8 ms
 static int skel_do_read_io(struct usb_skel *dev, size_t count)
 {
 	int rv;
@@ -287,9 +287,15 @@ retry:
 		 * IO may take forever
 		 * hence wait in an interruptible state
 		 */
+		// Unlocking since write uses the same mutex.
+		mutex_unlock(&dev->io_mutex);
 		rv = wait_event_interruptible(dev->int_in_wait, (!dev->ongoing_read));
 		if (rv < 0)
-			goto exit;
+			return rv;
+			
+		rv = mutex_lock_interruptible(&dev->io_mutex);
+		if (rv < 0)
+			return rv;
 	}
 
 	/* errors must be reported */
@@ -358,7 +364,7 @@ exit:
 	return rv;
 }
 
-static void skel_write_bulk_callback(struct urb *urb)
+static void skel_write_int_callback(struct urb *urb)
 {
 	struct usb_skel *dev;
 	unsigned long flags;
@@ -371,7 +377,7 @@ static void skel_write_bulk_callback(struct urb *urb)
 		    urb->status == -ECONNRESET ||
 		    urb->status == -ESHUTDOWN))
 			dev_err(&dev->interface->dev,
-				"%s - nonzero write bulk status received: %d\n",
+				"%s - nonzero write interrupt status received: %d\n",
 				__func__, urb->status);
 
 		spin_lock_irqsave(&dev->err_lock, flags);
@@ -382,15 +388,15 @@ static void skel_write_bulk_callback(struct urb *urb)
 	/* free up our allocated buffer */
 	usb_free_coherent(urb->dev, urb->transfer_buffer_length,
 			  urb->transfer_buffer, urb->transfer_dma);
+
+	dev_info(&dev->interface->dev, "skel_write_int_callback success (len: %u)", urb->actual_length);
+
 	up(&dev->limit_sem);
 }
 
 static ssize_t skel_write(struct file *file, const char *user_buffer,
 			  size_t count, loff_t *ppos)
 {
-	// TODO: Pisanie do urządzenia na chwilę nieczynne.
-	return -ERESTARTSYS;
-
 	struct usb_skel *dev;
 	int retval = 0;
 	struct urb *urb = NULL;
@@ -398,6 +404,7 @@ static ssize_t skel_write(struct file *file, const char *user_buffer,
 	size_t writesize = min_t(size_t, count, MAX_TRANSFER);
 
 	dev = file->private_data;
+	dev_info(&dev->interface->dev, "[skel_write] enter, count: %lu, ppos: %p", count, ppos);
 
 	/* verify that we actually have some data to write */
 	if (count == 0)
@@ -431,6 +438,7 @@ static ssize_t skel_write(struct file *file, const char *user_buffer,
 	if (retval < 0)
 		goto error;
 
+
 	/* create a urb, and a buffer for it, and copy the data to the urb */
 	urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!urb) {
@@ -459,13 +467,14 @@ static ssize_t skel_write(struct file *file, const char *user_buffer,
 	}
 
 	/* initialize the urb properly */
-	usb_fill_bulk_urb(urb, dev->udev,
-			  usb_sndbulkpipe(dev->udev, dev->int_out_endpointAddr),
-			  buf, writesize, skel_write_bulk_callback, dev);
+	usb_fill_int_urb(urb, dev->udev,
+			  usb_sndintpipe(dev->udev, dev->int_out_endpointAddr),
+			  buf, writesize, skel_write_int_callback, dev, INT_POLL_INERVAL);
 	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	usb_anchor_urb(urb, &dev->submitted);
 
-	/* send the data out the bulk port */
+	dev_info(&dev->interface->dev, "[skel_write] actually sending urb");
+	/* send the data out the interrupt port */
 	retval = usb_submit_urb(urb, GFP_KERNEL);
 	mutex_unlock(&dev->io_mutex);
 	if (retval) {
@@ -480,6 +489,7 @@ static ssize_t skel_write(struct file *file, const char *user_buffer,
 	 * it entirely
 	 */
 	usb_free_urb(urb);
+	dev_info(&dev->interface->dev, "[skel_write] urb sent");
 
 
 	return writesize;

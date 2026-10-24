@@ -106,6 +106,7 @@ elif [[ "$1" == "gadget-user" ]]; then
         if ! ssh -t -t -p ${PORT} root@localhost 'cd functionfs && ../gadgetfs_handler'; then
             echo "Failed to run gadgetfs_handler"
         fi
+        # echo "dummy_udc.0" > configfs/usb_gadget/g1/UDC
     fi 
 elif [[ "$1" == "driver-uspace-shell" ]]; then
     if ! scp -P ${PORT} ../userspace-driver/build/UserspaceDriverImpl root@localhost:/root; then
