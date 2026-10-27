@@ -72,6 +72,11 @@ elif [[ "$1" == "make" ]]; then
     source temporary-build-helper.sh
     popd
 
+    pushd ..
+    cmake -B ./build-br
+    cmake --build build-br
+    popd
+
 elif [[ "$1" == "gadget" ]]; then
     if ! scp -P ${PORT} configfs-gadget.sh root@localhost:/root; then
         echo "Failed to upload gadget script"
@@ -117,6 +122,16 @@ elif [[ "$1" == "driver-uspace-shell" ]]; then
         echo "Failed to run uspace driver"
     fi
     
+elif [[ "$1" == "install-udev" ]]; then
+    if ! ssh -t -t -p ${PORT} root@localhost 'rm /etc/udev/rules.d/98-volumeknob.rules'; then
+        echo "Failed to remove previous udev rule"
+    fi
+    if ! scp -P ${PORT} ../userspace-driver/98-volumeknob.rules root@localhost:/etc/udev/rules.d/; then
+        echo "Failed to upload udev rule"
+    fi
+    if ! scp -P ${PORT} ../userspace-driver/udev-script.sh root@localhost:/root; then
+        echo "Failed to upload udev script"
+    fi
 elif [[ "$1" == "serial" ]]; then
     if ! ssh -p ${PORT} root@localhost 'picocom -b 9600 -i /dev/ttyGS0'; then
     # if ! ssh -p ${PORT} root@localhost 'cat /dev/ttyUSB0'; then

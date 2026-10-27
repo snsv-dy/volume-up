@@ -167,9 +167,11 @@ Legenda:
 //     2. Reads on interrupt data
 // [x]    2.1 Adapt read in usb_skel
 // [x]    2.2 Adapt write in gadgetfs_handler
-//        2.4 Write userspace interface to the driver
+// [x]    2.4 Write userspace interface to the driver
 //            (Może wystarczy zmodyfikować audio.c ??)
 //            (albo jakiś osobny plik/program najpierw, łatwo integrowalny z audio.c później, + rodzaj notyfikacji gdy urządzenie się odłącza/podłącza w trakcie działania programu)
+//        2.8 Start driver on device connect. (udev rule probably)
+//        2.9 Integrate device interfacing part with audio.c
 //        2.7 
 //        2.5 Tests for userspace driver
 //            2.5.1 Unit: Read/write normally, device disconnects
@@ -189,3 +191,13 @@ Legenda:
 // [x] mockowanie urządzenia gadgetem? czy tym co kiedyś patrzyłeś.
 //     Sterownik windowsa? (resume driven dev)
 //     To w sumie mogłoby działać jak serial driver, ale już niech będzie, jako że to jest resume driven development.
+
+# Config (może być niekompletny)
+<!-- TODO: Włącz .config jako plik śledzony przez gita -->
+## Linux menuconfig
+CONFIG_CONFIGFS_FS
+CONFIG_USB_CONFIGFS_F_FS
+CONFIG_USB_GADGET
+CONFIG_USB_DUMMY_HCD
+CONFIG_USB_FUNCTIONFS
+CONFIG_USB_GADGETFS

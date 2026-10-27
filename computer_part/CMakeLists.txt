@@ -7,7 +7,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-project(audio C CXX)
+# project(audio C CXX)
+project(audio C)
 # Add executable. Default name is the project name, version 0.1
 
 add_executable(${PROJECT_NAME} audio.c)
@@ -39,37 +40,37 @@ add_executable(closefiletest closefiletest.c)
 # )
 
 
-add_subdirectory(os/glfw-3.5.1)
-find_package(OpenGL REQUIRED)
-# Gui requires libglfw3-dev to be installed.
-add_executable(gui 
-    ${CMAKE_CURRENT_LIST_DIR}/gui.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/os/gl.c
-    ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/imgui.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/imgui_demo.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/imgui_draw.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/imgui_tables.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/imgui_widgets.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/backends/imgui_impl_glfw.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master//backends/imgui_impl_opengl3.cpp
-)
+# add_subdirectory(os/glfw-3.5.1)
+# find_package(OpenGL REQUIRED)
+# # Gui requires libglfw3-dev to be installed.
+# add_executable(gui 
+#     ${CMAKE_CURRENT_LIST_DIR}/gui.cpp
+#     ${CMAKE_CURRENT_LIST_DIR}/os/gl.c
+#     ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/imgui.cpp
+#     ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/imgui_demo.cpp
+#     ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/imgui_draw.cpp
+#     ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/imgui_tables.cpp
+#     ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/imgui_widgets.cpp
+#     ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master/backends/imgui_impl_glfw.cpp
+#     ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master//backends/imgui_impl_opengl3.cpp
+# )
 
-target_link_libraries(gui PRIVATE 
-    glfw
-    GL
-    X11
-    pthread
-    dl
-)
+# target_link_libraries(gui PRIVATE 
+#     glfw
+#     GL
+#     X11
+#     pthread
+#     dl
+# )
 
-# get_filename_component(PARENT_DIR ../ ABSOLUTE)
-target_include_directories(gui PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}
-        ${CMAKE_CURRENT_LIST_DIR}/os/include
-        ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master # for imgui
+# # get_filename_component(PARENT_DIR ../ ABSOLUTE)
+# target_include_directories(gui PRIVATE
+#         ${CMAKE_CURRENT_LIST_DIR}
+#         ${CMAKE_CURRENT_LIST_DIR}/os/include
+#         ${CMAKE_CURRENT_LIST_DIR}/os/imgui-master # for imgui
         
-        # /home/jacek/programy/pico1/volume-up/usb_part/usb_format.h
-)
+#         # /home/jacek/programy/pico1/volume-up/usb_part/usb_format.h
+# )
 # message(WARNING ${PARENT_DIR})
 
 add_library(usb_protocol_basic SHARED usb_protocol_basic.c)

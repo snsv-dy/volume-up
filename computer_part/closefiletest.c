@@ -97,6 +97,9 @@ void *readThread(void* arg)
 
 int main()
 {
+    sleep(2);
+    return 1;
+    
     initSignal();
 
     int file = open("/dev/tty29", O_RDONLY | O_CLOEXEC);
@@ -107,7 +110,7 @@ int main()
     }
 
     pthread_t thread;
-    int result = pthread_create(&thread, NULL, readThread, file);
+    int result = pthread_create(&thread, NULL, readThread, (void*)file);
     if (result != 0)
     {
         perror("thread create");

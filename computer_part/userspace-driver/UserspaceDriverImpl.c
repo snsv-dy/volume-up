@@ -441,6 +441,7 @@ int main(int argc, char **argv)
 
         memcpy(devpath, argv[1], devpathLen + 1);
     }
+    printf("[main] using device %s\n", devpath);
     
     if (driverInit(printingCallback, NULL, &closing, &waitForDeviceThread))
     {
