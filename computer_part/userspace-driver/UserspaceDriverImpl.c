@@ -331,6 +331,7 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
     int result = close(programState.file);
     if (result == -1)
     {
+        // Poprawnym jest ponowić zamknięcie jeśli zostało przerwane sygnałem.
         int closecount = 0;
         while (closecount++ < 2 && errno == EINTR)
         {
@@ -342,15 +343,10 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
         }
         if (result != 0)
         {
+            // Jest błąd, ale w sumie co mogę z tym faktem zrobić teraz?
             perror("file close");
         }
     }
-
-    // TODO: Move to driverInit when he will be blocking.
-    // TODO: Keep track if file was closed??? 
-    // double close only results in EBADF errno.
-    // close(programState.readFile);
-    // close(programState.writeFile);
 
     return 0;
 }
@@ -366,6 +362,7 @@ void volumeChanged(uint8_t volumePercent)
     pthread_mutex_unlock(&programState.writeWaitMut);
 }
 
+#ifdef BUILD_MAIN
 
 void interruptSignalHandler()
 {
@@ -457,3 +454,5 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
+#endif

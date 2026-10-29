@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdbool.h>
 #include <pulse/pulseaudio.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -114,6 +115,7 @@ typedef struct {
     sem_t deviceThreadSem;
     sem_t* waitForDeviceThread;
     int running; // Na razie tylko w wątku urządzenia.
+    bool deviceInitFailed;
     //
 } OperationState;
 
@@ -256,7 +258,16 @@ void* inputThread(void* arg)
     printf("Trying to connect to device\n");
     const int maxRetries = 2;
     int nRetries = 0;
-    while (operationState->running && nRetries++ < maxRetries && driverInit(actionFromDeviceCallback, arg, &operationState->deviceThreadSem, operationState->waitForDeviceThread))
+    int initResult = 0;
+    while (
+        operationState->running && 
+        nRetries++ < maxRetries && 
+        (initResult = driverInit(
+            actionFromDeviceCallback, arg, 
+            &operationState->deviceThreadSem, 
+            operationState->waitForDeviceThread
+            ))
+        )
     {
         if (!operationState->running)
         {
@@ -264,12 +275,23 @@ void* inputThread(void* arg)
         }
         usleep(1000 * 1000); // 1000ms
     }
+    if (initResult != 0)
+    {
+        operationState->deviceInitFailed = true;
+        sem_post(operationState->waitForDeviceThread);
+    }
+
+    operationState->running = 0;
+
+    // sem_post(operationState->waitForDeviceThread);
     printf("[inputThread] exit.\n");
+    // return initResult;
         // }
     // }
 }
 
-void initInputThread(pthread_t* thread, OperationState* operationState, uint32_t waitForStart)
+// true - success
+bool initInputThread(pthread_t* thread, OperationState* operationState, uint32_t waitForStart)
 {
     assert(thread && operationState);
     // TODO:
@@ -285,7 +307,7 @@ void initInputThread(pthread_t* thread, OperationState* operationState, uint32_t
     {
         printf("Failed to initialize itc\n");
         // exit here;
-        return;
+        return false;
     }
     operationState->running = 1;
 
@@ -304,6 +326,8 @@ void initInputThread(pthread_t* thread, OperationState* operationState, uint32_t
         sem_wait(operationState->waitForDeviceThread);
     }
     sem_destroy(operationState->waitForDeviceThread);
+
+    return !operationState->deviceInitFailed;
 }
 
 void setAction(OperationState* operationState, int action)
@@ -382,7 +406,14 @@ int main(int argc, char *argv[]) {
 
     initInterruptSignal();
 
-    initInputThread(&inputThread, &operationState, 1);
+    // TOOD: zakładam, że program zawsze będzie czekał na wystartowanie 
+    //       wątku wejścia. W przeciwnym razie, w przypadku kiedy urządzenia z jakiegoś powodu
+    //       nie ma w systemie, program się zawiesza zamiast zakończyć.
+    if (!initInputThread(&inputThread, &operationState, 1))
+    {
+        fprintf(stderr, "[main] could not connect to device\n");
+        return 1;
+    }
     printf("input thread inited\n");
 
     if (pulseaudioMainLoop(&operationState) < 0) {
@@ -391,6 +422,8 @@ int main(int argc, char *argv[]) {
     }
     printf("Mainloop exit\n");
 
+    // Tak na wszelki wypadek, gdyby to nie urządzenie zainicjowało zakończenie.
+    sem_post(&__globalOperationState->deviceThreadSem);
     pthread_join(inputThread, NULL);
 
     return 0;
@@ -744,7 +777,7 @@ int pulseaudioMainLoop(OperationState* operationState) {
     int retval = 0;
     pa_mainloop_run(pa_ml, &retval);
 
-    printf("[audio.c] mainloop finished\n");
+    printf("[audio.c] mainloop finished retval: %d\n", retval);
     pa_context_disconnect(pa_ctx);
     pa_context_unref(pa_ctx);
     pa_mainloop_free(pa_ml);
@@ -906,9 +939,8 @@ void nextState(OperationState* operationState)
                 }
                 else if (operationState->itc->action == ACTION_SHUT_DOWN)
                 {
-                    // pa_context_disconnect(pa_ctx);
-                    // pa_context_unref(pa_ctx);
-                    // pa_mainloop_free(pa_ml);
+                    //
+                    // TODO: Tu coś się na buildroocie dzieje.
                     pa_mainloop_quit(operationState->pa_mainloop, 1);
                     return;
                 }

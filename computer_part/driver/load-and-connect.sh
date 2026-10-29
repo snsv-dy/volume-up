@@ -68,10 +68,11 @@ elif [[ "$1" == "make" ]]; then
 
     # For userspace part of the driver
     # (Move to makefile and the above as well idk.)
-    pushd ../userspace-driver/
-    source temporary-build-helper.sh
-    popd
+    # pushd ../userspace-driver/
+    # source temporary-build-helper.sh
+    # popd
 
+    # audio.c and userspace driver.
     pushd ..
     cmake -B ./build-br
     cmake --build build-br
@@ -113,6 +114,14 @@ elif [[ "$1" == "gadget-user" ]]; then
         fi
         # echo "dummy_udc.0" > configfs/usb_gadget/g1/UDC
     fi 
+elif [[ "$1" == "driver-audio" ]]; then
+    if ! scp -P ${PORT} ../build-br/audio root@localhost:/root; then
+        echo "Failed to upload usb driver"
+    fi 
+
+    if ! ssh -t -t -p ${PORT} root@localhost './audio'; then
+        echo "Failed to run audio with driver"
+    fi
 elif [[ "$1" == "driver-uspace-shell" ]]; then
     if ! scp -P ${PORT} ../userspace-driver/build/UserspaceDriverImpl root@localhost:/root; then
         echo "Failed to upload usb driver"

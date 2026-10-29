@@ -21,9 +21,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 # Add any user requested libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE
     pulse
-    usb_protocol_basic
+    # usb_protocol_basic # (libusb variant)
+    DeviceImpl # (kernel module variant)
 )
 add_executable(closefiletest closefiletest.c)
+
+add_subdirectory(userspace-driver)
 
 # add_executable(driverUspaceImpl driverUspaceImpl.c)
 

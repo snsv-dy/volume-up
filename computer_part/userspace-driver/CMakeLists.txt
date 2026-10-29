@@ -18,6 +18,7 @@ add_subdirectory(cmocka-2.0.2)
 # include(cmocka-2.0.2)
 # Add executable. Default name is the project name, version 0.1
 add_executable(${PROJECT_NAME})
+target_compile_definitions(${PROJECT_NAME} PRIVATE BUILD_MAIN)
 
 target_sources(${PROJECT_NAME}
     PRIVATE
@@ -26,8 +27,21 @@ target_sources(${PROJECT_NAME}
 
 # Add the standard include files to the build
 target_include_directories(${PROJECT_NAME} PRIVATE
-${CMAKE_CURRENT_LIST_DIR}/..
-${CMAKE_CURRENT_LIST_DIR}/../../usb_part
+    ${CMAKE_CURRENT_LIST_DIR}/..
+    ${CMAKE_CURRENT_LIST_DIR}/../../usb_part
+)
+
+# Program as a library 
+add_library(DeviceImpl STATIC)
+
+target_sources(DeviceImpl
+    PRIVATE
+    UserspaceDriverImpl.c
+)
+
+target_include_directories(DeviceImpl PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/..
+    ${CMAKE_CURRENT_LIST_DIR}/../../usb_part
 )
 
 # Adding CMocka
