@@ -296,14 +296,14 @@ int driverInit(ActionCallback callback, void* userData, sem_t* closing, sem_t* d
 
     if (closing)
     {
-        // sem_wait(closing);
-        while(sem_trywait(closing) == -1)
-        {
-            sleep(1);
-            static uint8_t volume = 0;
-            volumeChanged(volume);
-            volume++;
-        }
+        sem_wait(closing);
+        // while(sem_trywait(closing) == -1)
+        // {
+        //     sleep(1);
+        //     static uint8_t volume = 0;
+        //     volumeChanged(volume);
+        //     volume++;
+        // }
     }
     else
     {

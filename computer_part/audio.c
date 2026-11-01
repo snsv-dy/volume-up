@@ -939,6 +939,7 @@ void nextState(OperationState* operationState)
                 }
                 else if (operationState->itc->action == ACTION_SHUT_DOWN)
                 {
+                    printf("[audio.c] action shut down\n");
                     //
                     // TODO: Tu coś się na buildroocie dzieje.
                     pa_mainloop_quit(operationState->pa_mainloop, 1);
@@ -1133,6 +1134,7 @@ void pa_state_cb(pa_context *c, void *userdata) {
             case PA_CONTEXT_FAILED:
             case PA_CONTEXT_TERMINATED:
                     // TODO: Quit the pa main loop;
+                    printf("[pa state] %s\n", operationState->pa_state == PA_CONTEXT_FAILED ? "PA_CONTEXT_FAILED" : "PA_CONTEXT_TERMINATED");
                     pa_mainloop_quit(operationState->pa_mainloop, 1);
                     break;
             case PA_CONTEXT_READY:

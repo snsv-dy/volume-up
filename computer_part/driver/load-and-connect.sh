@@ -112,16 +112,39 @@ elif [[ "$1" == "gadget-user" ]]; then
         if ! ssh -t -t -p ${PORT} root@localhost 'cd functionfs && ../gadgetfs_handler'; then
             echo "Failed to run gadgetfs_handler"
         fi
-        # echo "dummy_udc.0" > configfs/usb_gadget/g1/UDC
+        
+        ssh -p ${PORT} root@localhost "
+        echo "dummy_udc.0" > configfs/usb_gadget/g1/UDC
+        sleep 1
+        chmod 0666 /dev/skel0
+        "
+
+        # if ! ; then
+        #     echo "could not make device rw for user."
+        # fi
     fi 
 elif [[ "$1" == "driver-audio" ]]; then
     if ! scp -P ${PORT} ../build-br/audio root@localhost:/root; then
         echo "Failed to upload usb driver"
-    fi 
-
-    if ! ssh -t -t -p ${PORT} root@localhost './audio'; then
-        echo "Failed to run audio with driver"
     fi
+
+    # # Install rule for skel0 access without root
+    # if ! ssh -p ${PORT} root@localhost 'rm /etc/udev/rules.d/97-volumeknob-access.rules'; then
+    #     echo "access rule not deleted or not found."
+    # fi
+    # if ! scp -P ${PORT} ../userspace-driver/97-volumeknob-access.rules root@localhost:/etc/udev/rules.d/; then
+    #     echo "could not upload access rule"
+    # fi
+    # start pulse daemon
+    if ! ssh -p ${PORT} user1@localhost 'pulseaudio --daemonize=yes --system=no --disallow-module-loading=1'; then
+        echo "failed to start pulse daemon. Exiting"
+        exit 1
+    fi
+    # create user if not exist?
+
+    # if ! ssh -t -t -p ${PORT} root@localhost './audio'; then
+    #     echo "Failed to run audio with driver"
+    # fi
 elif [[ "$1" == "driver-uspace-shell" ]]; then
     if ! scp -P ${PORT} ../userspace-driver/build/UserspaceDriverImpl root@localhost:/root; then
         echo "Failed to upload usb driver"

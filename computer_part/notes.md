@@ -57,6 +57,7 @@ TODO: Opisz jak skonfigurować kernela, żeby połączyć tego gadgeta ze sterow
 * dmesg -w
 * mount -t debugfs none /sys/kernel/debug/
 * xxd -c 1 /dev/skel0 # Bo komenda od 
+* pulseaudio --daemonize=yes --system=no --disallow-module-loading=1
 
 
 ===============================================================
@@ -170,14 +171,14 @@ Legenda:
 // [x]    2.4 Write userspace interface to the driver
 //            (Może wystarczy zmodyfikować audio.c ??)
 //            (albo jakiś osobny plik/program najpierw, łatwo integrowalny z audio.c później, + rodzaj notyfikacji gdy urządzenie się odłącza/podłącza w trakcie działania programu)
-//        2.8 Start driver on device connect. (udev rule probably)
-//        2.9 Integrate device interfacing part with audio.c
+// [x]    2.8 Start driver on device connect. (udev rule probably)
+// [x]    2.9 Integrate device interfacing part with audio.c
 //        2.7 
 //        2.5 Tests for userspace driver
 //            2.5.1 Unit: Read/write normally, device disconnects
 //            2.5.2 Integration/e2e: device reconnects, 
 //        2.6 Tests for audio.c???
-//     3. (opcjonalnie) wysyłanie po interrupcie, tak dla picu.
+//     3. wysyłanie po interrupcie, (zostało wywołać volumeChanged w odpowiednim miejscu audio.c).
 //        3.1 Adapt write in usb_skel (danymi będzie poziom głośności)
 // Kolejnie:
 // 1. Moduł uruchamia/komunikuje się z audio.c
