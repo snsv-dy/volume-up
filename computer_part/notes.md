@@ -58,6 +58,13 @@ TODO: Opisz jak skonfigurować kernela, żeby połączyć tego gadgeta ze sterow
 * mount -t debugfs none /sys/kernel/debug/
 * xxd -c 1 /dev/skel0 # Bo komenda od 
 * pulseaudio --daemonize=yes --system=no --disallow-module-loading=1
+# RUN+="/bin/sh /home/user1/udev-script.sh", \
+# ACTION=="add", \
+SUBSYSTEM=="usb", \
+    ATTRS{idVendor}=="cafe", \
+    ATTRS{idProduct}=="4013", \
+    MODE="0666", \
+    TAG+="uaccess"
 
 
 ===============================================================
@@ -178,8 +185,12 @@ Legenda:
 //            2.5.1 Unit: Read/write normally, device disconnects
 //            2.5.2 Integration/e2e: device reconnects, 
 //        2.6 Tests for audio.c???
-//     3. wysyłanie po interrupcie, (zostało wywołać volumeChanged w odpowiednim miejscu audio.c).
+// [x] 3. wysyłanie po interrupcie, (zostało wywołać volumeChanged w odpowiednim miejscu audio.c).
 //        3.1 Adapt write in usb_skel (danymi będzie poziom głośności)
+// --> 4. Przetestowanie audio.c odpalane z udeva
+//     5. Budowanie na docelowym systemie + instalowanie i uruchamianie
+//     x. gui do odpalania skryptów (parsowanie basha?)
+//     6. Przetestowanie, czy aby na pewno działa. (Nie rozwali komputera)
 // Kolejnie:
 // 1. Moduł uruchamia/komunikuje się z audio.c
 // 2. Wysyła żądania od urządzenia

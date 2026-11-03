@@ -1,3 +1,4 @@
 #!/bin/sh
 
-/root/UserspaceDriverImpl&
+
+/home/user1/audio&

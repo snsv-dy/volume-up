@@ -97,6 +97,9 @@ elif [[ "$1" == "gadget-user" ]]; then
     if ! scp -P ${PORT} build/usb_temp.ko root@localhost:/root; then
         echo "Failed to upload usb driver"
     fi 
+    if ! ssh -p ${PORT} root@localhost 'insmod /root/usb_temp.ko'; then
+        echo "Failed to insmod usb driver"
+    fi
 
     if ! ssh -p ${PORT} root@localhost 'mkdir -p functionfs && mount -t functionfs usb0 functionfs'; then
         echo "Failed to mount functionfs"
@@ -113,16 +116,34 @@ elif [[ "$1" == "gadget-user" ]]; then
             echo "Failed to run gadgetfs_handler"
         fi
         
-        ssh -p ${PORT} root@localhost "
-        echo "dummy_udc.0" > configfs/usb_gadget/g1/UDC
-        sleep 1
-        chmod 0666 /dev/skel0
-        "
+        # ssh -p ${PORT} root@localhost "
+        # echo "dummy_udc.0" > configfs/usb_gadget/g1/UDC
+        # sleep 1
+        # chmod 0666 /dev/skel0
+        # "
 
         # if ! ; then
         #     echo "could not make device rw for user."
         # fi
     fi 
+elif [[ "$1" == "device-in" ]]; then
+    (ssh -p ${PORT} root@localhost "
+        echo "dummy_udc.0" > configfs/usb_gadget/g1/UDC
+        sleep 1
+        chmod 0666 /dev/skel0
+        ")
+
+    if ! [[ $? ]]; then
+        echo "Failed to activate the device (plug in)"
+    fi
+elif [[ "$1" == "device-out" ]]; then
+(ssh -p ${PORT} root@localhost "
+        echo "" > configfs/usb_gadget/g1/UDC
+        ")
+
+    if ! $?; then
+        echo "Failed to deactivate the device (plug out)"
+    fi
 elif [[ "$1" == "driver-audio" ]]; then
     if ! scp -P ${PORT} ../build-br/audio root@localhost:/root; then
         echo "Failed to upload usb driver"
@@ -155,14 +176,17 @@ elif [[ "$1" == "driver-uspace-shell" ]]; then
     fi
     
 elif [[ "$1" == "install-udev" ]]; then
-    if ! ssh -t -t -p ${PORT} root@localhost 'rm /etc/udev/rules.d/98-volumeknob.rules'; then
+    if ! ssh -t -t -p ${PORT} root@localhost 'rm /etc/udev/rules.d/10-volumeknob.rules'; then
         echo "Failed to remove previous udev rule"
     fi
-    if ! scp -P ${PORT} ../userspace-driver/98-volumeknob.rules root@localhost:/etc/udev/rules.d/; then
+    if ! scp -P ${PORT} ../userspace-driver/10-volumeknob.rules root@localhost:/etc/udev/rules.d/; then
         echo "Failed to upload udev rule"
     fi
-    if ! scp -P ${PORT} ../userspace-driver/udev-script.sh root@localhost:/root; then
+    if ! scp -P ${PORT} ../userspace-driver/udev-script.sh user1@localhost:/home/user1; then
         echo "Failed to upload udev script"
+    fi
+    if ! scp -P ${PORT} ../build-br/audio user1@localhost:/home/user1; then
+        echo "Failed to upload userspace driver"
     fi
 elif [[ "$1" == "serial" ]]; then
     if ! ssh -p ${PORT} root@localhost 'picocom -b 9600 -i /dev/ttyGS0'; then

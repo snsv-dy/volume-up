@@ -1,0 +1,7 @@
+
+# RUN+="/bin/sh /home/user1/udev-script.sh", \
+# 
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
+    ATTRS{idVendor}=="cafe", \
+    ATTRS{idProduct}=="4013", \
+    TAG+="uaccess"

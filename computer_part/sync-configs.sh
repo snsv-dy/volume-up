@@ -4,6 +4,15 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 # Ten plik powinien exportować zmienne BUILDROOT_ LINUX_, w których znajdują się configi owych projektów.
 # (LINUX_ będzie wewnątrz buildroota)
+# Wzór:
+# ===============================
+# #!/bin/bash
+
+# # Tego do gita nie dodawaj.
+
+# export BUILDROOT_=
+# export LINUX_=$BUILDROOT_/output/build/linux-x.xx.x
+# ===============================
 source $SCRIPT_DIR/configs-paths.sh
 
 echo "BUILDROOT_: $BUILDROOT_"
