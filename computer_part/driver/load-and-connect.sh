@@ -4,6 +4,11 @@ PORT=5556
 module_name=scull.ko
 driver_path=driver
 
+USERUSED=root
+USERHOME=/root
+# USERUSED=user1
+# USERHOME=/home/user1
+
 if [[ "$1" == "l" ]]; then
     # source ./copy-to-vm.sh
     if ! ssh -p ${PORT} root@localhost 'cd driver'; then
@@ -79,44 +84,55 @@ elif [[ "$1" == "make" ]]; then
     popd
 
 elif [[ "$1" == "gadget" ]]; then
-    if ! scp -P ${PORT} configfs-gadget.sh root@localhost:/root; then
+    if ! scp -P ${PORT} configfs-gadget.sh $USERUSED@localhost:$USERHOME; then
         echo "Failed to upload gadget script"
         exit 1
     fi
-    if ! ssh -p ${PORT} root@localhost './configfs-gadget.sh'; then
+    # Root since mount is in the script
+    if ! ssh -p ${PORT} root@localhost "$USERHOME/configfs-gadget.sh"; then
         echo "Failed to execute gadget script"
     else
         echo "Gadget probably created"
-        # if ! ssh -p ${PORT} root@localhost 'echo 0xCAFE 0x4013 > /sys/bus/usb-serial/drivers/generic/new_id'; then
+        # if ! ssh -p ${PORT} $USERUSED@localhost 'echo 0xCAFE 0x4013 > /sys/bus/usb-serial/drivers/generic/new_id'; then
         #     echo "Failed to connect gadget to serial driver"
         # else
         #     echo "serial driver connected to gadget"
         # fi
     fi
 elif [[ "$1" == "gadget-user" ]]; then
-    if ! scp -P ${PORT} build/usb_temp.ko root@localhost:/root; then
+    if ! scp -P ${PORT} build/usb_temp.ko $USERUSED@localhost:$USERHOME; then
         echo "Failed to upload usb driver"
     fi 
-    if ! ssh -p ${PORT} root@localhost 'insmod /root/usb_temp.ko'; then
+    if ! ssh -p ${PORT} $USERUSED@localhost "insmod $USERHOME/usb_temp.ko"; then
         echo "Failed to insmod usb driver"
     fi
 
-    if ! ssh -p ${PORT} root@localhost 'mkdir -p functionfs && mount -t functionfs usb0 functionfs'; then
+    if ! ssh -p ${PORT} $USERUSED@localhost 'mkdir -p functionfs && mount -t functionfs usb0 functionfs'; then
         echo "Failed to mount functionfs"
     fi
 
-    if ! ssh -p ${PORT} root@localhost 'rm gadgetfs_handler'; then
+    if ! ssh -p ${PORT} $USERUSED@localhost 'rm gadgetfs_handler'; then
         echo "Failed to remove previous gadgetfs_handler"
     fi 
 
-    if ! scp -P ${PORT} build/gadgetfs_handler root@localhost:/root; then
-        echo "Failed to upload gadgetfs_handler"
+    if ! ssh -p ${PORT} user1@localhost 'pulseaudio --daemonize=yes --system=no --disallow-module-loading=1'; then
+        echo "Failed to run pulseaudio daemon as user1"
     else
-        if ! ssh -t -t -p ${PORT} root@localhost 'cd functionfs && ../gadgetfs_handler'; then
+        echo "pulseaudio daemon should be running."
+    fi
+
+    if ! ssh -p ${PORT} root@localhost "rm /root/rule-result*.txt"; then
+        echo "Failed to remove tag.txt file"
+    fi
+
+    if ! scp -P ${PORT} build/gadgetfs_handler $USERUSED@localhost:$USERHOME; then
+        echo "Failed to upload gadgetfs_handler"
+    else    
+        if ! ssh -t -t -p ${PORT} $USERUSED@localhost 'cd functionfs && ../gadgetfs_handler'; then
             echo "Failed to run gadgetfs_handler"
         fi
         
-        # ssh -p ${PORT} root@localhost "
+        # ssh -p ${PORT} $USERUSED@localhost "
         # echo "dummy_udc.0" > configfs/usb_gadget/g1/UDC
         # sleep 1
         # chmod 0666 /dev/skel0
@@ -126,18 +142,20 @@ elif [[ "$1" == "gadget-user" ]]; then
         #     echo "could not make device rw for user."
         # fi
     fi 
+elif [[ "$1" == "syslog" ]]; then
+    if ! ssh -p ${PORT} user1@localhost 'tail -f /var/log/messages'; then
+        echo "failed to read logs"
+    fi
 elif [[ "$1" == "device-in" ]]; then
-    (ssh -p ${PORT} root@localhost "
+    (ssh -p ${PORT} $USERUSED@localhost "
         echo "dummy_udc.0" > configfs/usb_gadget/g1/UDC
-        sleep 1
-        chmod 0666 /dev/skel0
         ")
 
     if ! [[ $? ]]; then
         echo "Failed to activate the device (plug in)"
     fi
 elif [[ "$1" == "device-out" ]]; then
-(ssh -p ${PORT} root@localhost "
+(ssh -p ${PORT} $USERUSED@localhost "
         echo "" > configfs/usb_gadget/g1/UDC
         ")
 
@@ -145,7 +163,7 @@ elif [[ "$1" == "device-out" ]]; then
         echo "Failed to deactivate the device (plug out)"
     fi
 elif [[ "$1" == "driver-audio" ]]; then
-    if ! scp -P ${PORT} ../build-br/audio root@localhost:/root; then
+    if ! scp -P ${PORT} ../build-br/audio $USERUSED@localhost:$USERHOME; then
         echo "Failed to upload usb driver"
     fi
 
@@ -176,14 +194,17 @@ elif [[ "$1" == "driver-uspace-shell" ]]; then
     fi
     
 elif [[ "$1" == "install-udev" ]]; then
-    if ! ssh -t -t -p ${PORT} root@localhost 'rm /etc/udev/rules.d/10-volumeknob.rules'; then
+    if ! ssh -t -t -p ${PORT} root@localhost 'rm /etc/udev/rules.d/*.rules'; then
         echo "Failed to remove previous udev rule"
     fi
-    if ! scp -P ${PORT} ../userspace-driver/10-volumeknob.rules root@localhost:/etc/udev/rules.d/; then
+    if ! scp -P ${PORT} ../userspace-driver/*.rules root@localhost:/etc/udev/rules.d/; then
         echo "Failed to upload udev rule"
     fi
     if ! scp -P ${PORT} ../userspace-driver/udev-script.sh user1@localhost:/home/user1; then
         echo "Failed to upload udev script"
+    fi
+    if ! scp -P ${PORT} ../userspace-driver/udev-script-debug.sh root@localhost:/root; then
+        echo "Failed to upload udev debug script"
     fi
     if ! scp -P ${PORT} ../build-br/audio user1@localhost:/home/user1; then
         echo "Failed to upload userspace driver"

@@ -1,7 +1,10 @@
 #!/bin/sh
 
 mkdir configfs
-mount none configfs -t configfs
+su root -c 'mount none configfs -t configfs'
+# CURRENT_USER=$(whoami)
+# su root -c "chown -R $CURRENT_USER ./configfs"
+# su root -c "chmod 775 ./configfs"
 mkdir -p configfs/usb_gadget/g1
 cd configfs/usb_gadget/g1
 echo 0xcafe > idVendor

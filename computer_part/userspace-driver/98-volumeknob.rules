@@ -1,0 +1,6 @@
+# SUBSYSTEM=="usb",
+SUBSYSTEM=="usbmisc", \
+    ATTRS{idVendor}=="cafe", \
+    ATTRS{idProduct}=="4013", \
+    MODE="0666", \
+    RUN+="/bin/sh /root/udev-script-debug.sh"
