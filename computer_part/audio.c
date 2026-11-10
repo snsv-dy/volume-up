@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <stdatomic.h>
 #include <device_interface.h>
+#include <math.h>
 
 #define SMALL_STR_LEN 128
 #define MEDIUM_STR_LEN 256
@@ -486,7 +487,7 @@ void sink_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
     operationState->defaultSink.set = 1;
     // git@github.com:rxi/log.c.git
     printf("[Sink updated] sink[%d] vol: %2f\n", operationState->defaultSink.index, (double)pa_cvolume_avg(&operationState->defaultSink.cvolume) / PA_VOLUME_NORM * 100.0);
-    volumeChanged((uint8_t)(pa_cvolume_avg(&(i->volume)) * 100 / PA_VOLUME_NORM));
+    volumeChanged((uint8_t)ceil(pa_cvolume_avg(&(i->volume)) * 100.0 / PA_VOLUME_NORM));
     
     nextState(operationState);
 }

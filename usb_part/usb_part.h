@@ -4,6 +4,7 @@
 #define INTERRUPT_EP_IN  (0x01 | 0b10000000) // 7th bit is direction (1 - in, 0 - out)
 #define INTERRUPT_EP_OUT (0x02 | 0b00000000)
 #define INTERRUPT_EP_SIZE 8
+#define WRITE_MESSAGE_SIZE 1
 #define INTERRUPT_EP_INTERVAL 20 // ms (allowed: 1 - 255)
 
 

@@ -58,7 +58,7 @@ void enableSigusr1()
 }
 
 #define DEVPATH_STATIC_LEN 128
-static char devpath[DEVPATH_STATIC_LEN] = "/dev/skel0";
+static char devpath[DEVPATH_STATIC_LEN] = "/dev/skel1";
 
 void shutdownThreads(ProgramState* programState, bool fromRead, bool fromWrite)
 {

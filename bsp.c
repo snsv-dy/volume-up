@@ -67,7 +67,7 @@ bool periodicCheck(repeating_timer_t *rt)
 void encoderFunctionCallback();
 void gpioHandler(uint gpio, uint32_t event_mask)
 {
-    printf("gpioHandler: %d, 0x%x\n", gpio, event_mask);
+    // printf("gpioHandler: %d, 0x%x\n", gpio, event_mask);
     
     if (
            (gpio == VOL_UP_BUTTON || gpio == VOL_DN_BUTTON) 
@@ -90,7 +90,7 @@ static int __functionChanged = 1;
 // void encoderFunctionCallback(uint gpio, uint32_t event_mask)
 void encoderFunctionCallback()
 {
-    printf("encoderFunctionCallback\n");
+    // printf("encoderFunctionCallback\n");
     // if (gpio_get_irq_event_mask(CHANGE_FUNC_BUTTON) & GPIO_IRQ_EDGE_FALL)
     // {
     //     gpio_acknowledge_irq(CHANGE_FUNC_BUTTON, GPIO_IRQ_EDGE_FALL);
@@ -387,7 +387,16 @@ void initLcd(LcdState* lcdState)
     }
 }
 
+
+static uint8_t __mainVolume = 0;
+void setVolumeValue(uint8_t value)
+{
+    __mainVolume = value;
+    __volumeChanged = true;
+}
+
 static LcdState __globalLcdState = {0};
+
 
 void bspInit()
 {
@@ -417,21 +426,21 @@ void bspTask()
     }
 
     // Volume testing
-    static uint8_t testVolume = 0;
+    // static uint8_t testVolume = 0;
     
-    static uint32_t lastVolumeChange = 0;
-    const uint32_t currentMs = to_ms_since_boot(get_absolute_time());
-    if (currentMs - lastVolumeChange >= 100)
-    {
-        testVolume = (testVolume + 1) % 101;
-        __volumeChanged = true;
-        lastVolumeChange = currentMs;
-    }
+    // static uint32_t lastVolumeChange = 0;
+    // const uint32_t currentMs = to_ms_since_boot(get_absolute_time());
+    // if (currentMs - lastVolumeChange >= 1000)
+    // {
+    //     testVolume = (testVolume + 1) % 101;
+    //     __volumeChanged = true;
+    //     lastVolumeChange = currentMs;
+    // }
     // Volume testing end
     
     if (__volumeChanged)
     {
-        lcdPrintVolume(&__globalLcdState, testVolume);
+        lcdPrintVolume(&__globalLcdState, __mainVolume);
 
         __volumeChanged = false;
     }

@@ -187,10 +187,11 @@ Legenda:
 //        2.6 Tests for audio.c???
 // [x] 3. wysyłanie po interrupcie, (zostało wywołać volumeChanged w odpowiednim miejscu audio.c).
 //        3.1 Adapt write in usb_skel (danymi będzie poziom głośności)
-// --> 4. Przetestowanie audio.c odpalane z udeva
-//     5. Budowanie na docelowym systemie + instalowanie i uruchamianie
+// [x] 4. Przetestowanie audio.c odpalane z udeva
+// --> 5. Budowanie na docelowym systemie + instalowanie i uruchamianie
 //     x. gui do odpalania skryptów (parsowanie basha?)
-//     6. Przetestowanie, czy aby na pewno działa. (Nie rozwali komputera)
+// [x? 6. Przetestowanie, czy aby na pewno działa. (Nie rozwali komputera)
+//     7. Program się nie zamyka przy ctrl+c
 // Kolejnie:
 // 1. Moduł uruchamia/komunikuje się z audio.c
 // 2. Wysyła żądania od urządzenia

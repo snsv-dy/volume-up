@@ -134,8 +134,9 @@ void tud_vendor_int_rx_cb(uint8_t itf, const uint8_t *buffer, uint32_t bufsize)
         if (bufferSizeLeft > 0 && action == ACTION_GET_VOLUME)
         {
             uint8_t volume = buffer[1];
+            setVolumeValue(volume);
             
-            printf("Received volume: %d\n", volume);
+            // printf("Received volume: %d\n", volume);
         }
         // printf("tud_vendor_rx_cb: itf: %d: ", itf);
         //     for (int i = 0; i < bufsize; i++)
@@ -304,7 +305,7 @@ void vendor_task()
             return;
         }
 
-        tud_vendor_n_int_write(0, writeBuffer, INTERRUPT_EP_SIZE);
+        tud_vendor_n_int_write(0, writeBuffer, WRITE_MESSAGE_SIZE);
         // tud_vendor_write_flush();
         writeRequested = 1;
         printf("Packet sent\n");

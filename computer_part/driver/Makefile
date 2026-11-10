@@ -7,11 +7,18 @@ ifneq ($(KERNELRELEASE),)
 	# line; invoke the kernel build system.
 else
 	KERNELDIR ?= /lib/modules/$(shell uname -r)/build
-	PWD := $(shell pwd)
+	MOD_DIR ?= $(shell pwd)
+# 	PWD := $(shell pwd)
+# 	BUILD_DIR ?= $(PWD)/build
+# 	export KBUILD_OUTPUT=$(BUILD_DIR)
 default:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) MO=$(PWD)/build modules
+	@echo pwd $(PWD)
+	@echo build_dir $(BUILD_DIR)
+	@echo KERNELDIR $(KERNELDIR)
+	$(MAKE) -C $(KERNELDIR) M=$(MOD_DIR) MO=$(shell pwd)/build modules
+# 	$(MAKE) -C $(KERNELDIR) M=$(MOD_DIR) modules
 endif
-
+# make -C /lib/modules/`uname -r`/build M=$PWD MO=$PWD/build1
 
 clean:
 	rm -r *.o *~ core .depend .*.cmd *.ko *.mod.c .tmp_versions *.mod modules.order *.symvers

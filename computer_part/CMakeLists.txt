@@ -23,6 +23,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     pulse
     # usb_protocol_basic # (libusb variant)
     DeviceImpl # (kernel module variant)
+    m # math.h
 )
 add_executable(closefiletest closefiletest.c)
 

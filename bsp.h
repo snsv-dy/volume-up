@@ -78,6 +78,8 @@ bool isVolumeDown();
 bool isActionAvailable();
 uint8_t getAction();
 
+void setVolumeValue(uint8_t value);
+
 uint8_t getState();
 void bspTask();
 
