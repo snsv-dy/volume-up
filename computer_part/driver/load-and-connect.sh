@@ -166,6 +166,9 @@ elif [[ "$1" == "driver-audio" ]]; then
     if ! scp -P ${PORT} ../build-br/audio $USERUSED@localhost:$USERHOME; then
         echo "Failed to upload usb driver"
     fi
+    if ! scp -P ${PORT} ../build-br/audio user1@localhost:/home/user1; then
+        echo "Failed to upload usb driver"
+    fi
 
     # # Install rule for skel0 access without root
     # if ! ssh -p ${PORT} root@localhost 'rm /etc/udev/rules.d/97-volumeknob-access.rules'; then

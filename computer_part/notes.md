@@ -136,6 +136,16 @@ read /dev/volumeknob in userspace driver part
 
 write to /dev/volumeknob in userspace driver part
 
+## audio.c structs/protocol
+
+[
+    from device = [value of enum from usb_part/usb_format.h if for audio.c
+                   otherwise, should be handled by the driver, and from then kill audio.c if necessary]
+                   * As of this commit, the shutdown is done by sending ACTION_DEVICE_SHUTDOWN, and then audio.c ends driver thread.
+    internal command [COMMAND_INCORRECT, STATE_UPDATING_OBJECTS, STATE_SETTING_VOLUME, 
+                      STATE_SHUTTING_DOWN]
+]
+
 
 ### Różne rzeczy
 
